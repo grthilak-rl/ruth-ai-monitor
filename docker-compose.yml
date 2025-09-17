@@ -1,0 +1,219 @@
+version: '3.8'
+
+services:
+  # API Gateway - Nginx reverse proxy
+  api-gateway:
+    image: nginx:alpine
+    container_name: ruth-monitor-gateway
+    ports:
+      - "3005:80"
+      - "3006:443"
+    volumes:
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./configs/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - auth-service
+      - camera-service
+      - violation-service
+      - ai-models-service
+      - notification-service
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+
+  # Database - MySQL
+  database:
+    image: mysql:8.0
+    container_name: ruth-monitor-database
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ruth_monitor_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ruth_monitor}
+      MYSQL_USER: ${MYSQL_USER:-ruth_monitor}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ruth_monitor_pass}
+    volumes:
+      - ./shared/database/data:/var/lib/mysql
+      - ./shared/database/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3308:3306"
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Redis - Cache and session store
+  redis:
+    image: redis:7-alpine
+    container_name: ruth-monitor-redis
+    ports:
+      - "6381:6379"
+    volumes:
+      - ./shared/redis/data:/data
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 10s
+      retries: 5
+
+  # Auth Service
+  auth-service:
+    build: ./services/auth-service
+    container_name: ruth-monitor-auth
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=mysql://${MYSQL_USER:-ruth_monitor}:${MYSQL_PASSWORD:-ruth_monitor_pass}@database:3306/${MYSQL_DATABASE:-ruth_monitor}
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-ruth_monitor_jwt_secret_key}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      timeout: 10s
+      retries: 5
+
+  # Camera Service
+  camera-service:
+    build: ./services/camera-service
+    container_name: ruth-monitor-camera
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=mysql://${MYSQL_USER:-ruth_monitor}:${MYSQL_PASSWORD:-ruth_monitor_pass}@database:3306/${MYSQL_DATABASE:-ruth_monitor}
+      - REDIS_URL=redis://redis:6379
+      - VAS_API_URL=${VAS_API_URL:-http://10.30.250.245:8000/api}
+      - VAS_USERNAME=${VAS_USERNAME:-admin}
+      - VAS_PASSWORD=${VAS_PASSWORD:-admin123}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      timeout: 10s
+      retries: 5
+
+  # Violation Service
+  violation-service:
+    build: ./services/violation-service
+    container_name: ruth-monitor-violation
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=mysql://${MYSQL_USER:-ruth_monitor}:${MYSQL_PASSWORD:-ruth_monitor_pass}@database:3306/${MYSQL_DATABASE:-ruth_monitor}
+      - REDIS_URL=redis://redis:6379
+      - AI_MODELS_URL=http://ai-models-service:8000
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-models-service:
+        condition: service_healthy
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      timeout: 10s
+      retries: 5
+
+  # AI Models Service
+  ai-models-service:
+    build: ./services/ai-models-service
+    container_name: ruth-monitor-ai-models
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MODEL_PATH=/app/models
+    volumes:
+      - ./services/ai-models-service/models:/app/models:ro
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      timeout: 10s
+      retries: 5
+
+  # Notification Service
+  notification-service:
+    build: ./services/notification-service
+    container_name: ruth-monitor-notification
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+      # Database Configuration
+      - DB_HOST=database
+      - DB_PORT=3306
+      - DB_NAME=${MYSQL_DATABASE:-ruth_monitor}
+      - DB_USER=${MYSQL_USER:-ruth_monitor}
+      - DB_PASSWORD=${MYSQL_PASSWORD:-ruth_monitor_pass}
+      # Auth Service Integration
+      - AUTH_SERVICE_URL=http://auth-service:3000
+      # Notification Channels
+      - EMAIL_SERVICE_URL=${EMAIL_SERVICE_URL:-}
+      - SMS_SERVICE_URL=${SMS_SERVICE_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@ruth-ai.com}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      # Admin Configuration
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@ruth-ai.com}
+      - ADMIN_PHONE=${ADMIN_PHONE:-+1234567890}
+      # CORS Configuration
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+    depends_on:
+      database:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Web Frontend
+  web-frontend:
+    build: ./services/web-frontend
+    container_name: ruth-monitor-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:3000/api
+      - REACT_APP_WS_URL=ws://localhost:3000
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+
+networks:
+  ruth-monitor-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  database-data:
+  redis-data:

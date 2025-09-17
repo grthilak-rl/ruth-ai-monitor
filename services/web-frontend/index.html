@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>industrial-safety-monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="description" content="Web site created using create-react-app" />
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="manifest" href="/manifest.json" />
+  
+  <!-- Janus WebRTC Gateway Library -->
+  <script src="/libs/janus.js"></script>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  
+  <!-- WebRTC Polyfills and Janus Overrides -->
+  <script>
+    // Ensure getUserMedia is available
+    if (!navigator.mediaDevices) {
+      navigator.mediaDevices = {};
+    }
+    if (!navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia = function(constraints) {
+        return new Promise(function(resolve, reject) {
+          try {
+            const stream = new MediaStream();
+            resolve(stream);
+          } catch (e) {
+            reject(new Error('MediaStream not available'));
+          }
+        });
+      };
+    }
+    
+    // Add enumerateDevices polyfill
+    if (!navigator.mediaDevices.enumerateDevices) {
+      navigator.mediaDevices.enumerateDevices = function() {
+        return new Promise(function(resolve) {
+          resolve([]);
+        });
+      };
+    }
+    
+    // Override Janus captureDevices function to prevent local media capture
+    window.addEventListener('load', function() {
+      if (window.Janus && window.Janus.captureDevices) {
+        const originalCaptureDevices = window.Janus.captureDevices;
+        window.Janus.captureDevices = function() {
+          return [];
+        };
+      }
+    });
+  </script>
+  
+<script type="module" src="https://static.rocket.new/rocket-web.js?_cfg=https%3A%2F%2Findustrial7346back.builtwithrocket.new&_be=https%3A%2F%2Fapplication.rocket.new&_v=0.1.8"></script>
+</head>
+
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div class="dhiwise-code" id="root"></div>
+  <script type="module" src="/src/index.jsx"></script>
+</body>
+
+</html>

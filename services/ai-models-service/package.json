@@ -1,0 +1,30 @@
+{
+  "name": "ruth-ai-models-service",
+  "version": "1.0.0",
+  "description": "AI Models Service for Ruth-AI Monitor - Industrial Safety Monitoring",
+  "main": "api/app.py",
+  "scripts": {
+    "start": "python -m uvicorn api.app:app --host 0.0.0.0 --port 8000",
+    "dev": "python -m uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload",
+    "test": "python test_service.py",
+    "test:health": "python test_service.py http://localhost:8000",
+    "build": "docker build -t ruth-ai-models-service .",
+    "logs": "docker logs ruth-monitor-ai-models -f"
+  },
+  "keywords": [
+    "ai",
+    "computer-vision",
+    "safety-monitoring",
+    "fall-detection",
+    "work-at-height",
+    "fastapi",
+    "python"
+  ],
+  "author": "Ruth-AI Team",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "python": ">=3.9"
+  }
+}

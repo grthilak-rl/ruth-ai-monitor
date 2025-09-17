@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct Janus Gateway Connection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        .video-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .camera-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: #f9f9f9;
+        }
+        .camera-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        video {
+            width: 100%;
+            max-width: 320px;
+            height: 240px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #000;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .logs {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .mountpoint-info {
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Direct Janus Gateway Connection Test</h1>
+        <p>Connecting directly to Janus Gateway like VAS frontend does</p>
+        
+        <div id="status" class="status info">Initializing...</div>
+        
+        <div>
+            <button onclick="initializeJanus()">Initialize Janus</button>
+            <button onclick="connectToStreams()">Connect to All Streams</button>
+            <button onclick="disconnectAll()">Disconnect All</button>
+            <button onclick="clearLogs()">Clear Logs</button>
+        </div>
+        
+        <div id="video-container" class="video-container"></div>
+        
+        <div>
+            <h3>Connection Logs</h3>
+            <div id="logs" class="logs"></div>
+        </div>
+    </div>
+
+    <!-- Load Janus library from working CDN -->
+    <script src="https://unpkg.com/janus-gateway@1.3.0/janus.js"></script>
+    
+    <script>
+        const JANUS_URL = 'ws://10.30.250.245:8188/janus';
+        let janus = null;
+        let sessions = [];
+        let streams = [
+            { id: 1, name: "Camera 1 - Office", mountpoint: 1 },
+            { id: 2, name: "Camera 2 - Lobby", mountpoint: 2 }
+        ];
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logsDiv = document.getElementById('logs');
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function initializeJanus() {
+            log('🔍 Initializing Janus library...');
+            updateStatus('Initializing Janus...', 'info');
+            
+            if (typeof Janus === 'undefined') {
+                log('❌ Janus library not loaded');
+                updateStatus('Janus library not loaded', 'error');
+                return;
+            }
+            
+            Janus.init({
+                debug: "all",
+                callback: function() {
+                    log('✅ Janus library initialized successfully');
+                    connectToJanus();
+                }
+            });
+        }
+
+        function connectToJanus() {
+            log(`🔗 Connecting to Janus Gateway: ${JANUS_URL}`);
+            updateStatus('Connecting to Janus Gateway...', 'info');
+            
+            janus = new Janus({
+                server: JANUS_URL,
+                success: function() {
+                    log('✅ Connected to Janus Gateway successfully');
+                    updateStatus('Connected to Janus Gateway', 'success');
+                    createVideoElements();
+                },
+                error: function(error) {
+                    log(`❌ Failed to connect to Janus: ${error}`);
+                    updateStatus(`Connection failed: ${error}`, 'error');
+                },
+                destroyed: function() {
+                    log('🔌 Janus connection destroyed');
+                }
+            });
+        }
+
+        function createVideoElements() {
+            const container = document.getElementById('video-container');
+            container.innerHTML = '';
+            
+            streams.forEach(stream => {
+                const cameraCard = document.createElement('div');
+                cameraCard.className = 'camera-card';
+                cameraCard.innerHTML = `
+                    <h3>${stream.name}</h3>
+                    <video id="video-${stream.id}" autoplay playsinline muted></video>
+                    <div class="mountpoint-info">Mountpoint ID: ${stream.mountpoint}</div>
+                    <button onclick="connectToStream(${stream.id})">Connect</button>
+                    <button onclick="disconnectStream(${stream.id})">Disconnect</button>
+                `;
+                container.appendChild(cameraCard);
+            });
+        }
+
+        function connectToStreams() {
+            log('🎬 Connecting to all streams...');
+            streams.forEach(stream => {
+                connectToStream(stream.id);
+            });
+        }
+
+        function connectToStream(streamId) {
+            if (!janus) {
+                log('❌ Janus not initialized');
+                return;
+            }
+            
+            const stream = streams.find(s => s.id === streamId);
+            if (!stream) {
+                log(`❌ Stream ${streamId} not found`);
+                return;
+            }
+            
+            log(`🎬 Connecting to ${stream.name}...`);
+            
+            janus.attach({
+                plugin: "janus.plugin.streaming",
+                success: function(pluginHandle) {
+                    log(`✅ Attached to streaming plugin for ${stream.name}`);
+                    
+                    const video = document.getElementById(`video-${streamId}`);
+                    if (!video) {
+                        log(`❌ Video element not found for ${stream.name}`);
+                        return;
+                    }
+                    
+                    // Store the plugin handle
+                    stream.pluginHandle = pluginHandle;
+                    
+                    // Set up event handlers
+                    pluginHandle.onmessage = function(msg, jsep) {
+                        log(`📨 Message from ${stream.name}:`, msg);
+                        
+                        if (jsep) {
+                            log(`🎬 SDP ${jsep.type} received for ${stream.name}:`, jsep);
+                            pluginHandle.handleRemoteJsep({ jsep: jsep });
+                        }
+                        
+                        if (msg.streaming) {
+                            if (msg.streaming === 'event' && msg.result) {
+                                log(`📊 Stream event for ${stream.name}:`, msg.result);
+                            }
+                        }
+                    };
+                    
+                    pluginHandle.onremotestream = function(stream) {
+                        log(`🎥 Remote stream received for ${stream.name}:`, stream);
+                        const video = document.getElementById(`video-${streamId}`);
+                        if (video) {
+                            video.srcObject = stream;
+                            log(`🎬 Set srcObject for ${stream.name}`);
+                        }
+                    };
+                    
+                    pluginHandle.oncleanup = function() {
+                        log(`🧹 Plugin cleanup for ${stream.name}`);
+                    };
+                    
+                    // Send watch request
+                    const watch = {
+                        request: "watch",
+                        id: stream.mountpoint
+                    };
+                    
+                    log(`⏳ Sending watch request for ${stream.name}...`);
+                    pluginHandle.send({ message: watch });
+                },
+                error: function(error) {
+                    log(`❌ Failed to attach to streaming plugin for ${stream.name}: ${error}`);
+                },
+                consentDialog: function(on) {
+                    log(`🔒 Consent dialog ${on ? 'on' : 'off'} for ${stream.name}`);
+                },
+                iceState: function(state) {
+                    log(`🧊 ICE state for ${stream.name}: ${state}`);
+                },
+                mediaState: function(medium, on) {
+                    log(`📡 Media state for ${stream.name}: ${medium} ${on ? 'on' : 'off'}`);
+                },
+                webrtcState: function(on) {
+                    log(`🌐 WebRTC state for ${stream.name}: ${on ? 'up' : 'down'}`);
+                    if (on) {
+                        log(`🎉 Video playing for ${stream.name}!`);
+                    }
+                },
+                slowLink: function(uplink, lost) {
+                    log(`🐌 Slow link for ${stream.name}: uplink=${uplink}, lost=${lost}`);
+                },
+                ondataopen: function() {
+                    log(`📊 Data channel opened for ${stream.name}`);
+                },
+                ondata: function(data) {
+                    log(`📊 Data received for ${stream.name}:`, data);
+                },
+                oncleanup: function() {
+                    log(`🧹 Cleanup for ${stream.name}`);
+                }
+            });
+        }
+
+        function disconnectStream(streamId) {
+            const stream = streams.find(s => s.id === streamId);
+            if (stream && stream.pluginHandle) {
+                log(`🔌 Disconnecting ${stream.name}...`);
+                stream.pluginHandle.detach();
+                stream.pluginHandle = null;
+                
+                const video = document.getElementById(`video-${streamId}`);
+                if (video) {
+                    video.srcObject = null;
+                }
+                
+                log(`✅ Disconnected ${stream.name}`);
+            }
+        }
+
+        function disconnectAll() {
+            log('🔌 Disconnecting all streams...');
+            streams.forEach(stream => {
+                disconnectStream(stream.id);
+            });
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        // Initialize when page loads
+        log('🚀 Direct Janus Gateway Connection Test initialized');
+        updateStatus('Ready to connect to Janus Gateway', 'info');
+    </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# AI Models Configuration
+models:
+  work_at_height:
+    name: "Work at Height Safety Detection"
+    type: "object_detection"
+    framework: "yolov8"
+    weights_file: "work-at-height/best.wah.pt"
+    confidence_threshold: 0.5
+    classes:
+      - "person_at_height"
+      - "safety_equipment"
+    
+  fall_detection:
+    name: "Fall Detection via Pose Estimation"
+    type: "pose_estimation"
+    framework: "yolov7"
+    weights_file: "fall-detection/yolov7-w6-pose.pt"
+    confidence_threshold: 0.6
+    keypoints: 17
+    classes:
+      - "person_standing"
+      - "person_falling"
+      - "person_fallen"

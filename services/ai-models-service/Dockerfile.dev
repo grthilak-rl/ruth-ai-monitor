@@ -1,0 +1,37 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgl1-mesa-dev \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    git \
+    wget \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY packages/ai-models/requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Copy source code
+COPY packages/ai-models/api ./api
+COPY packages/ai-models/src ./src
+COPY packages/ai-models/notebooks ./notebooks
+COPY packages/ai-models/scripts ./scripts
+COPY packages/ai-models/models ./models
+
+# Create necessary directories
+RUN mkdir -p /app/models /app/temp_frames
+
+# Expose ports
+EXPOSE 8000 8888
+
+# Default command (can be overridden in docker-compose)
+CMD ["bash", "-c", "jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='ruth-ai-dev-token' & python -m uvicorn api.app:app --reload --host 0.0.0.0 --port 8000"]
