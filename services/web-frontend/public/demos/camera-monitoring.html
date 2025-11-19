@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruth-AI VAS Integration Demo</title>
+    <script src="/vas-test/adapter.js"></script>
+    <script src="/vas-test/janus.js"></script>
+    <script src="/vas-test/vas-webrtc-client.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .camera-card { transition: all 0.3s ease; }
+        .camera-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .status-indicator { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Ruth-AI Header -->
+    <div class="bg-blue-600 text-white shadow-lg">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
+                        <span class="text-blue-600 font-bold text-xl"></span>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold">AI Powered Industrial Safety Monitor</h1>
+                        <p class="text-blue-200 text-sm">Live Camera Monitoring</p>
+                    </div>
+                </div>
+                <div id="connection-status" class="flex items-center space-x-2 bg-blue-700 px-4 py-2 rounded-lg">
+                    <div class="w-3 h-3 bg-red-400 rounded-full status-indicator"></div>
+                    <span class="text-sm">Disconnected from VAS</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- VAS Connection Panel -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-gray-800"> VAS Integration Control</h2>
+                <div class="flex space-x-3">
+                    <button id="connect-vas" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg transition-colors">
+                         Connect to VAS
+                    </button>
+                    <button id="refresh-cameras" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors" disabled>
+                         Refresh Cameras
+                    </button>
+                    <button id="disconnect-vas" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition-colors" disabled>
+                         Disconnect
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                <div class="bg-gray-50 p-3 rounded">
+                    <span class="font-medium text-gray-600">VAS Server:</span>
+                    <span class="ml-2">http://localhost:8000</span>
+                </div>
+                <div class="bg-gray-50 p-3 rounded">
+                    <span class="font-medium text-gray-600">Authentication:</span>
+                    <span class="ml-2">admin/admin123</span>
+                </div>
+                <div class="bg-gray-50 p-3 rounded">
+                    <span class="font-medium text-gray-600">Total Cameras:</span>
+                    <span id="total-cameras" class="ml-2">0</span>
+                </div>
+                <div class="bg-gray-50 p-3 rounded">
+                    <span class="font-medium text-gray-600">Streaming:</span>
+                    <span id="streaming-cameras" class="ml-2">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Camera Grid -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xl font-semibold text-gray-800"> Live Camera Feeds with AI Models</h2>
+                <div class="text-sm text-gray-600">
+                    <span>Connected: </span>
+                    <span id="connected-count" class="font-medium">0</span>
+                    <span> / </span>
+                    <span id="available-count" class="font-medium">0</span>
+                </div>
+            </div>
+            <div id="cameras-grid" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                <!-- Cameras will be populated here -->
+                <div class="text-center py-12 text-gray-500 col-span-full">
+                    <div class="text-6xl mb-4"></div>
+                    <h3 class="text-lg font-medium mb-2">Connect to VAS to Load Cameras</h3>
+                    <p class="text-sm">Click "Connect to VAS" above to discover and monitor live camera feeds</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Detection Status -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4"> AI Detection Models</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-green-50 border border-green-200 p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-green-800">Fall Detection</h3>
+                            <p class="text-sm text-green-600">YOLOv7 Pose Estimation</p>
+                        </div>
+                        <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                    </div>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="font-medium text-blue-800">Work at Height</h3>
+                            <p class="text-sm text-blue-600">Safety Violation Detection</p>
+                        </div>
+                        <div class="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Logs -->
+    <div class="bg-gray-900 text-green-400 p-6">
+        <div class="container mx-auto">
+            <h3 class="text-lg font-medium mb-4"> System Integration Logs</h3>
+            <div id="logs-container" class="bg-black p-4 rounded font-mono text-sm h-48 overflow-y-auto">
+                <!-- Logs will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let vasClient = null;
+        let connectedCameras = new Set();
+        let allCameras = [];
+        let availableCameras = [];
+
+        // Logging function
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logContainer = document.getElementById('logs-container');
+            const logEntry = document.createElement('div');
+            const colors = {
+                'info': 'text-green-400',
+                'success': 'text-green-300', 
+                'error': 'text-red-400',
+                'warning': 'text-yellow-400'
+            };
+            logEntry.className = colors[type] || 'text-green-400';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Update connection status and counts
+        function updateStatus(connected, totalCameras = 0, streamingCameras = 0) {
+            const statusEl = document.getElementById('connection-status');
+            const totalEl = document.getElementById('total-cameras');
+            const streamingEl = document.getElementById('streaming-cameras');
+            const connectedCountEl = document.getElementById('connected-count');
+            const availableCountEl = document.getElementById('available-count');
+            const refreshBtn = document.getElementById('refresh-cameras');
+            const disconnectBtn = document.getElementById('disconnect-vas');
+            
+            if (connected) {
+                statusEl.innerHTML = `
+                    <div class="w-3 h-3 bg-green-400 rounded-full status-indicator"></div>
+                    <span class="text-sm">Connected to VAS</span>
+                `;
+                statusEl.className = 'flex items-center space-x-2 bg-green-700 px-4 py-2 rounded-lg';
+                refreshBtn.disabled = false;
+                disconnectBtn.disabled = false;
+            } else {
+                statusEl.innerHTML = `
+                    <div class="w-3 h-3 bg-red-400 rounded-full status-indicator"></div>
+                    <span class="text-sm">Disconnected from VAS</span>
+                `;
+                statusEl.className = 'flex items-center space-x-2 bg-blue-700 px-4 py-2 rounded-lg';
+                refreshBtn.disabled = true;
+                disconnectBtn.disabled = true;
+            }
+            
+            totalEl.textContent = totalCameras;
+            streamingEl.textContent = streamingCameras;
+            connectedCountEl.textContent = connectedCameras.size;
+            availableCountEl.textContent = streamingCameras;
+        }
+
+        // Connect to VAS and discover cameras dynamically
+        async function connectToVAS() {
+            const connectBtn = document.getElementById('connect-vas');
+
+            try {
+                connectBtn.disabled = true;
+                connectBtn.textContent = ' Connecting...';
+                addLog(' Ruth-AI: Initializing VAS integration...', 'info');
+
+                // Initialize VAS client
+                vasClient = new VASWebRTCClient('http://localhost:8000');
+                await vasClient.initialize();
+                addLog(' VAS WebRTC client initialized', 'success');
+
+                // Authenticate
+                await vasClient.authenticate('admin', 'admin123');
+                addLog(' Authenticated with VAS server', 'success');
+
+                // Discover cameras dynamically
+                await refreshCameraList();
+
+                connectBtn.textContent = ' Connect to VAS';
+                connectBtn.disabled = false;
+
+            } catch (error) {
+                addLog(` VAS connection failed: ${error.message}`, 'error');
+                updateStatus(false);
+                connectBtn.textContent = ' Connect to VAS';
+                connectBtn.disabled = false;
+            }
+        }
+
+        // Refresh camera list from VAS
+        async function refreshCameraList() {
+            if (!vasClient) {
+                addLog(' Not connected to VAS', 'error');
+                return;
+            }
+
+            try {
+                addLog(' Discovering cameras from VAS...', 'info');
+                
+                // Get all cameras from VAS
+                const camerasData = await vasClient.getAllCameras();
+                allCameras = camerasData.cameras || [];
+                availableCameras = allCameras.filter(c => c.stream_available);
+                
+                addLog(` Found ${allCameras.length} total cameras`, 'info');
+                addLog(` ${availableCameras.length} cameras have streaming available`, 'success');
+                
+                // Log camera details
+                availableCameras.forEach(camera => {
+                    addLog(`   ${camera.name} (${camera.location}) - Stream ID: ${camera.webrtc_config.stream_id}`, 'info');
+                });
+                
+                updateStatus(true, allCameras.length, availableCameras.length);
+                renderCameras(availableCameras);
+
+            } catch (error) {
+                addLog(` Failed to refresh cameras: ${error.message}`, 'error');
+            }
+        }
+
+        // Render cameras dynamically
+        function renderCameras(cameras) {
+            const grid = document.getElementById('cameras-grid');
+            
+            if (cameras.length === 0) {
+                grid.innerHTML = `
+                    <div class="text-center py-12 text-gray-500 col-span-full">
+                        <div class="text-6xl mb-4"></div>
+                        <h3 class="text-lg font-medium mb-2">No Streaming Cameras Available</h3>
+                        <p class="text-sm">Add cameras to VAS with streaming enabled, then click "Refresh Cameras"</p>
+                        <button onclick="refreshCameraList()" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors">
+                             Check for New Cameras
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = cameras.map(camera => {
+                const safeId = camera.id.replace(/[^a-zA-Z0-9]/g, '_'); // Make ID safe for HTML
+                return `
+                <div class="camera-card bg-gray-50 rounded-lg p-4 border border-gray-200" id="card-${safeId}">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="font-semibold text-gray-800">${camera.name}</h3>
+                            <p class="text-sm text-gray-600">${camera.location}</p>
+                            <p class="text-xs text-gray-500">IP: ${camera.ip_address}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                            <span class="text-xs text-green-600">${camera.status.toUpperCase()}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="relative bg-black rounded-lg mb-4" style="aspect-ratio: 16/9;">
+                        <video id="video-${safeId}" class="w-full h-full object-cover rounded-lg" autoplay muted playsinline></video>
+                        <div id="overlay-${safeId}" class="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center text-white rounded-lg">
+                             Click Connect to start streaming
+                        </div>
+                        <div class="absolute top-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white text-xs">
+                            Stream ID: ${camera.webrtc_config.stream_id}
+                        </div>
+                        <div class="absolute top-2 right-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white text-xs">
+                            ${camera.metadata?.manufacturer || 'Camera'}
+                        </div>
+                    </div>
+                    
+                    <div class="flex space-x-2 mb-4">
+                        <button onclick="connectCamera('${camera.id}', '${safeId}')" 
+                                class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded transition-colors text-sm connect-btn">
+                             Connect Stream
+                        </button>
+                        <button onclick="disconnectCamera('${camera.id}', '${safeId}')" 
+                                class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded transition-colors text-sm disconnect-btn" disabled>
+                             Disconnect
+                        </button>
+                    </div>
+                    
+                    <!-- AI Models Panel -->
+                    <div class="bg-white p-3 rounded border">
+                        <h4 class="text-sm font-medium text-gray-700 mb-2"> AI Models</h4>
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-2 text-sm">
+                                <input type="checkbox" class="rounded" onchange="toggleAIModel('${camera.id}', 'fall-detection', this.checked)">
+                                <span>Fall Detection</span>
+                                <span class="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">94% acc</span>
+                            </label>
+                            <label class="flex items-center space-x-2 text-sm">
+                                <input type="checkbox" class="rounded" onchange="toggleAIModel('${camera.id}', 'work-at-height', this.checked)">
+                                <span>Work at Height</span>
+                                <span class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">89% acc</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `;
+            }).join('');
+        }
+
+        // Connect to camera (works with any camera from VAS)
+        async function connectCamera(deviceId, safeId) {
+            if (!vasClient) {
+                addLog(' Not connected to VAS server', 'error');
+                return;
+            }
+
+            try {
+                const videoElement = document.getElementById(`video-${safeId}`);
+                const overlay = document.getElementById(`overlay-${safeId}`);
+                const card = document.getElementById(`card-${safeId}`);
+                const connectBtn = card.querySelector('.connect-btn');
+                const disconnectBtn = card.querySelector('.disconnect-btn');
+                
+                addLog(` Ruth-AI: Connecting to camera ${deviceId}...`, 'info');
+                overlay.textContent = ' Connecting...';
+                connectBtn.disabled = true;
+
+                // Set up event listeners
+                videoElement.addEventListener('playing', () => {
+                    const camera = allCameras.find(c => c.id === deviceId);
+                    addLog(` ${camera?.name || 'Camera'} streaming successfully!`, 'success');
+                    overlay.style.display = 'none';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    connectedCameras.add(deviceId);
+                    updateStatus(true, allCameras.length, availableCameras.length);
+                });
+
+                videoElement.addEventListener('error', (e) => {
+                    addLog(` Video error for camera ${deviceId}: ${e.message || 'Unknown error'}`, 'error');
+                    overlay.textContent = ' Video error';
+                    connectBtn.disabled = false;
+                });
+
+                // Connect via VAS client
+                await vasClient.connectToCamera(deviceId, videoElement);
+
+            } catch (error) {
+                addLog(` Failed to connect camera ${deviceId}: ${error.message}`, 'error');
+                const overlay = document.getElementById(`overlay-${safeId}`);
+                const connectBtn = document.getElementById(`card-${safeId}`).querySelector('.connect-btn');
+                overlay.textContent = ' Connection failed - Click to retry';
+                connectBtn.disabled = false;
+            }
+        }
+
+        // Disconnect camera
+        async function disconnectCamera(deviceId, safeId) {
+            if (!vasClient) return;
+
+            try {
+                await vasClient.disconnectCamera(deviceId);
+                
+                const videoElement = document.getElementById(`video-${safeId}`);
+                const overlay = document.getElementById(`overlay-${safeId}`);
+                const card = document.getElementById(`card-${safeId}`);
+                const connectBtn = card.querySelector('.connect-btn');
+                const disconnectBtn = card.querySelector('.disconnect-btn');
+                
+                videoElement.srcObject = null;
+                overlay.textContent = ' Click Connect to start streaming';
+                overlay.style.display = 'flex';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                
+                connectedCameras.delete(deviceId);
+                updateStatus(true, allCameras.length, availableCameras.length);
+                
+                const camera = allCameras.find(c => c.id === deviceId);
+                addLog(` ${camera?.name || 'Camera'} disconnected`, 'info');
+            } catch (error) {
+                addLog(` Error disconnecting camera ${deviceId}: ${error.message}`, 'error');
+            }
+        }
+
+        // Toggle AI Model (Demo)
+        function toggleAIModel(cameraId, modelType, enabled) {
+            const camera = allCameras.find(c => c.id === cameraId);
+            const cameraName = camera?.name || 'Camera';
+            const status = enabled ? 'enabled' : 'disabled';
+            addLog(` Ruth-AI: ${modelType} ${status} for ${cameraName}`, 'info');
+        }
+
+        // Disconnect all
+        async function disconnectAll() {
+            if (!vasClient) return;
+
+            try {
+                await vasClient.disconnectAll();
+                vasClient = null;
+                connectedCameras.clear();
+                allCameras = [];
+                availableCameras = [];
+                
+                updateStatus(false);
+                document.getElementById('cameras-grid').innerHTML = `
+                    <div class="text-center py-12 text-gray-500 col-span-full">
+                        <div class="text-6xl mb-4"></div>
+                        <h3 class="text-lg font-medium mb-2">Connect to VAS to Load Cameras</h3>
+                        <p class="text-sm">Click "Connect to VAS" above to discover and monitor live camera feeds</p>
+                    </div>
+                `;
+                
+                document.getElementById('connect-vas').disabled = false;
+                
+                addLog(' Disconnected from all cameras', 'info');
+            } catch (error) {
+                addLog(` Error during disconnect: ${error.message}`, 'error');
+            }
+        }
+
+        // Initialize when all scripts are loaded
+        window.addEventListener('load', () => {
+            // Event listeners
+            document.getElementById('connect-vas').onclick = connectToVAS;
+            document.getElementById('refresh-cameras').onclick = refreshCameraList;
+            document.getElementById('disconnect-vas').onclick = disconnectAll;
+
+            // Initialize
+            addLog(' AI Powered Industrial Safety Monitor initialized', 'info');
+            addLog(' VAS Integration ready - Click Connect to discover cameras', 'info');
+            
+            // Check library availability
+            if (typeof window.Janus !== 'undefined') {
+                addLog(' Janus WebRTC library loaded', 'success');
+            } else {
+                addLog(' Janus WebRTC library NOT loaded', 'error');
+            }
+            if (typeof window.VASWebRTCClient !== 'undefined') {
+                addLog(' VAS WebRTC client library loaded', 'success');
+            } else {
+                addLog(' VAS WebRTC client library NOT loaded', 'error');
+            }
+
+            // Handle page unload
+            window.addEventListener('beforeunload', () => {
+                if (vasClient) {
+                    vasClient.disconnectAll();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

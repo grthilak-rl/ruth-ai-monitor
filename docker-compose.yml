@@ -196,9 +196,16 @@ services:
       retries: 3
       start_period: 40s
 
-  # Web Frontend - Manual deployment (development)
-  # Frontend runs manually with: npm run dev
-  # Access at: http://localhost:3004 or http://10.30.250.245:3004
+  # Web Frontend
+  web-frontend:
+    build: ./services/web-frontend
+    container_name: ruth-monitor-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:3000/api
+      - REACT_APP_WS_URL=ws://localhost:3000
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
 
 networks:
   ruth-monitor-network:
