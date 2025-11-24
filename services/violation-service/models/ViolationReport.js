@@ -1,4 +1,4 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes, Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 
 const ViolationReport = sequelize.define('ViolationReport', {
@@ -237,7 +237,7 @@ ViolationReport.findByDateRange = async function(startDate, endDate) {
   return await this.findAll({
     where: {
       created_at: {
-        [sequelize.Op.between]: [startDate, endDate]
+        [Op.between]: [startDate, endDate]
       }
     },
     order: [['created_at', 'DESC']]
@@ -276,7 +276,7 @@ ViolationReport.getViolationStats = async function() {
   const today = await this.count({
     where: {
       created_at: {
-        [sequelize.Op.gte]: new Date(new Date().setHours(0, 0, 0, 0))
+        [Op.gte]: new Date(new Date().setHours(0, 0, 0, 0))
       }
     }
   });
@@ -284,7 +284,7 @@ ViolationReport.getViolationStats = async function() {
   const thisWeek = await this.count({
     where: {
       created_at: {
-        [sequelize.Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       }
     }
   });

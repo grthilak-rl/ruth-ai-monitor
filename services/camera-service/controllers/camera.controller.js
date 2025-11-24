@@ -3,38 +3,44 @@ const Camera = require('../models/Camera');
 const vasIntegrationService = require('../services/vasIntegration.service');
 
 /**
- * Get all cameras
+ * Get all cameras from VAS V2
  * @route GET /cameras
  */
 const getAllCameras = async (req, res) => {
   try {
-    const { status, active } = req.query;
-    
-    let whereClause = {};
-    
-    if (status) {
-      whereClause.status = status;
-    }
-    
+    const { active } = req.query;
+
+    const devices = await vasIntegrationService.getAllDevices();
+
+    let filteredDevices = devices;
     if (active !== undefined) {
-      whereClause.is_active = active === 'true';
+      const isActive = active === 'true';
+      filteredDevices = devices.filter(device => device.is_active === isActive);
     }
 
-    const cameras = await Camera.findAll({
-      where: whereClause,
-      order: [['name', 'ASC']]
-    });
+    const cameras = filteredDevices.map(device => ({
+      id: device.id,
+      name: device.name,
+      location: device.location || 'Unknown',
+      description: device.description,
+      rtsp_url: device.rtsp_url,
+      is_active: device.is_active,
+      status: device.is_active ? 'ONLINE' : 'OFFLINE',
+      vas_device_id: device.id,
+      created_at: device.created_at,
+      updated_at: device.updated_at
+    }));
 
     res.json({
       success: true,
       count: cameras.length,
-      cameras: cameras.map(camera => camera.getPublicInfo())
+      cameras
     });
   } catch (error) {
-    console.error('Error fetching cameras:', error);
-    res.status(500).json({ 
+    console.error('Error fetching cameras from VAS:', error);
+    res.status(500).json({
       error: 'Internal Server Error',
-      message: 'Failed to fetch cameras' 
+      message: 'Failed to fetch cameras from VAS V2'
     });
   }
 };
@@ -386,35 +392,21 @@ const getCameraStreamStatus = async (req, res) => {
  */
 const startCameraStream = async (req, res) => {
   try {
-    const camera = await Camera.findByPk(req.params.id);
-    if (!camera) {
-      return res.status(404).json({ 
-        error: 'Not Found',
-        message: 'Camera not found' 
-      });
-    }
+    const deviceId = req.params.id;
 
-    if (!camera.vas_device_id) {
-      return res.status(400).json({ 
-        error: 'Bad Request',
-        message: 'Camera not synced with VAS. Please sync first.' 
-      });
-    }
-
-    const streamResult = await vasIntegrationService.startCameraStream(camera.vas_device_id);
+    const streamResult = await vasIntegrationService.startCameraStream(deviceId);
     res.json({
       success: true,
       message: 'Camera stream started successfully',
-      camera_id: camera.id,
-      vas_device_id: camera.vas_device_id,
+      device_id: deviceId,
       ...streamResult
     });
   } catch (error) {
     console.error('Error starting camera stream:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to start camera stream',
-      error_details: error.message 
+      error_details: error.message
     });
   }
 };
@@ -425,35 +417,21 @@ const startCameraStream = async (req, res) => {
  */
 const stopCameraStream = async (req, res) => {
   try {
-    const camera = await Camera.findByPk(req.params.id);
-    if (!camera) {
-      return res.status(404).json({ 
-        error: 'Not Found',
-        message: 'Camera not found' 
-      });
-    }
+    const deviceId = req.params.id;
 
-    if (!camera.vas_device_id) {
-      return res.status(400).json({ 
-        error: 'Bad Request',
-        message: 'Camera not synced with VAS' 
-      });
-    }
-
-    const streamResult = await vasIntegrationService.stopCameraStream(camera.vas_device_id);
+    const streamResult = await vasIntegrationService.stopCameraStream(deviceId);
     res.json({
       success: true,
       message: 'Camera stream stopped successfully',
-      camera_id: camera.id,
-      vas_device_id: camera.vas_device_id,
+      device_id: deviceId,
       ...streamResult
     });
   } catch (error) {
     console.error('Error stopping camera stream:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to stop camera stream',
-      error_details: error.message 
+      error_details: error.message
     });
   }
 };
@@ -557,10 +535,435 @@ const getWebRTCSystemStatus = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting WebRTC system status:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to get WebRTC system status',
-      error_details: error.message 
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get recording dates for a camera
+ * @route GET /cameras/:id/recordings/dates
+ */
+const getRecordingDates = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const dates = await vasIntegrationService.getRecordingDates(camera.vas_device_id);
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...dates
+    });
+  } catch (error) {
+    console.error('Error getting recording dates:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get recording dates',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get recording playlist for a camera
+ * @route GET /cameras/:id/recordings/playlist
+ */
+const getRecordingPlaylist = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const playlist = await vasIntegrationService.getRecordingPlaylist(camera.vas_device_id);
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...playlist
+    });
+  } catch (error) {
+    console.error('Error getting recording playlist:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get recording playlist',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Capture live snapshot from camera
+ * @route POST /cameras/:id/snapshots/live
+ */
+const captureSnapshotLive = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const snapshot = await vasIntegrationService.captureSnapshotLive(camera.vas_device_id);
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...snapshot
+    });
+  } catch (error) {
+    console.error('Error capturing live snapshot:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to capture live snapshot',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Capture historical snapshot from camera
+ * @route POST /cameras/:id/snapshots/historical
+ */
+const captureSnapshotHistorical = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const { timestamp } = req.body;
+    if (!timestamp) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Timestamp is required'
+      });
+    }
+
+    const snapshot = await vasIntegrationService.captureSnapshotHistorical(camera.vas_device_id, timestamp);
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...snapshot
+    });
+  } catch (error) {
+    console.error('Error capturing historical snapshot:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to capture historical snapshot',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get all snapshots with optional filtering
+ * @route GET /cameras/snapshots
+ */
+const getSnapshots = async (req, res) => {
+  try {
+    const { device_id, limit, skip } = req.query;
+    const filters = {};
+
+    if (device_id) filters.deviceId = device_id;
+    if (limit) filters.limit = parseInt(limit);
+    if (skip) filters.skip = parseInt(skip);
+
+    const snapshots = await vasIntegrationService.getSnapshots(filters);
+    res.json({
+      success: true,
+      ...snapshots
+    });
+  } catch (error) {
+    console.error('Error getting snapshots:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get snapshots',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get snapshot details
+ * @route GET /cameras/snapshots/:snapshotId
+ */
+const getSnapshot = async (req, res) => {
+  try {
+    const { snapshotId } = req.params;
+    const snapshot = await vasIntegrationService.getSnapshot(snapshotId);
+    res.json({
+      success: true,
+      snapshot
+    });
+  } catch (error) {
+    console.error('Error getting snapshot:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get snapshot',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Delete snapshot
+ * @route DELETE /cameras/snapshots/:snapshotId
+ */
+const deleteSnapshot = async (req, res) => {
+  try {
+    const { snapshotId } = req.params;
+    await vasIntegrationService.deleteSnapshot(snapshotId);
+    res.json({
+      success: true,
+      message: 'Snapshot deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting snapshot:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to delete snapshot',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Capture live bookmark from camera
+ * @route POST /cameras/:id/bookmarks/live
+ */
+const captureBookmarkLive = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const { label } = req.body;
+    const bookmark = await vasIntegrationService.captureBookmarkLive(camera.vas_device_id, label);
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...bookmark
+    });
+  } catch (error) {
+    console.error('Error capturing live bookmark:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to capture live bookmark',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Capture historical bookmark from camera
+ * @route POST /cameras/:id/bookmarks/historical
+ */
+const captureBookmarkHistorical = async (req, res) => {
+  try {
+    const camera = await Camera.findByPk(req.params.id);
+    if (!camera) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Camera not found'
+      });
+    }
+
+    if (!camera.vas_device_id) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Camera not synced with VAS'
+      });
+    }
+
+    const { center_timestamp, label } = req.body;
+    if (!center_timestamp) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'center_timestamp is required'
+      });
+    }
+
+    const bookmark = await vasIntegrationService.captureBookmarkHistorical(
+      camera.vas_device_id,
+      center_timestamp,
+      label
+    );
+    res.json({
+      success: true,
+      camera_id: camera.id,
+      vas_device_id: camera.vas_device_id,
+      ...bookmark
+    });
+  } catch (error) {
+    console.error('Error capturing historical bookmark:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to capture historical bookmark',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get all bookmarks with optional filtering
+ * @route GET /cameras/bookmarks
+ */
+const getBookmarks = async (req, res) => {
+  try {
+    const { device_id, limit, skip } = req.query;
+    const filters = {};
+
+    if (device_id) filters.deviceId = device_id;
+    if (limit) filters.limit = parseInt(limit);
+    if (skip) filters.skip = parseInt(skip);
+
+    const bookmarks = await vasIntegrationService.getBookmarks(filters);
+    res.json({
+      success: true,
+      ...bookmarks
+    });
+  } catch (error) {
+    console.error('Error getting bookmarks:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get bookmarks',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get bookmark details
+ * @route GET /cameras/bookmarks/:bookmarkId
+ */
+const getBookmark = async (req, res) => {
+  try {
+    const { bookmarkId } = req.params;
+    const bookmark = await vasIntegrationService.getBookmark(bookmarkId);
+    res.json({
+      success: true,
+      bookmark
+    });
+  } catch (error) {
+    console.error('Error getting bookmark:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to get bookmark',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Update bookmark label
+ * @route PUT /cameras/bookmarks/:bookmarkId
+ */
+const updateBookmark = async (req, res) => {
+  try {
+    const { bookmarkId } = req.params;
+    const { label } = req.body;
+
+    if (!label) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Label is required'
+      });
+    }
+
+    const bookmark = await vasIntegrationService.updateBookmark(bookmarkId, label);
+    res.json({
+      success: true,
+      message: 'Bookmark updated successfully',
+      bookmark
+    });
+  } catch (error) {
+    console.error('Error updating bookmark:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to update bookmark',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Delete bookmark
+ * @route DELETE /cameras/bookmarks/:bookmarkId
+ */
+const deleteBookmark = async (req, res) => {
+  try {
+    const { bookmarkId } = req.params;
+    await vasIntegrationService.deleteBookmark(bookmarkId);
+    res.json({
+      success: true,
+      message: 'Bookmark deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting bookmark:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to delete bookmark',
+      error_details: error.message
     });
   }
 };
@@ -581,5 +984,18 @@ module.exports = {
   getWebRTCStreams,
   getWebRTCStreamConfig,
   getWebRTCStreamStatus,
-  getWebRTCSystemStatus
+  getWebRTCSystemStatus,
+  getRecordingDates,
+  getRecordingPlaylist,
+  captureSnapshotLive,
+  captureSnapshotHistorical,
+  getSnapshots,
+  getSnapshot,
+  deleteSnapshot,
+  captureBookmarkLive,
+  captureBookmarkHistorical,
+  getBookmarks,
+  getBookmark,
+  updateBookmark,
+  deleteBookmark
 };
