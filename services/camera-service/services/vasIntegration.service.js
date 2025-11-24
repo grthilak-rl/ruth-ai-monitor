@@ -2,76 +2,69 @@ const axios = require('axios');
 
 class VASIntegrationService {
   constructor() {
-    this.vasApiUrl = process.env.VAS_API_URL || 'http://10.30.250.245:8000/api';
-    this.vasAuthToken = null;
-    this.isAuthenticated = false;
-    this.authRetryCount = 0;
-    this.maxAuthRetries = 3;
+    this.vasApiUrl = process.env.VAS_API_URL || 'http://10.30.250.245:8080';
+    this.vasApiVersion = process.env.VAS_API_VERSION || 'v1';
+    this.vasApiKey = process.env.VAS_API_KEY || null;
+    this.vasRequireAuth = process.env.VAS_REQUIRE_AUTH !== 'false';
+    this.mediasoupUrl = process.env.MEDIASOUP_URL || 'ws://10.30.250.245:3001';
   }
 
   /**
-   * Authenticate with VAS API
-   */
-  async authenticate() {
-    try {
-      console.log('🔐 Authenticating with VAS...');
-      
-      const response = await axios.post(`${this.vasApiUrl}/auth/login-json`, 
-        {
-          username: process.env.VAS_USERNAME || 'admin',
-          password: process.env.VAS_PASSWORD || 'admin123'
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000 // 10 second timeout
-        }
-      );
-      
-      this.vasAuthToken = response.data.access_token;
-      this.isAuthenticated = true;
-      this.authRetryCount = 0;
-      console.log('✅ VAS authentication successful');
-      return true;
-    } catch (error) {
-      this.authRetryCount++;
-      console.error('❌ VAS authentication failed:', error.response?.data || error.message);
-      this.isAuthenticated = false;
-      
-      if (this.authRetryCount < this.maxAuthRetries) {
-        console.log(`🔄 Retrying authentication (${this.authRetryCount}/${this.maxAuthRetries})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-        return await this.authenticate();
-      }
-      
-      return false;
-    }
-  }
-
-  /**
-   * Get authenticated axios instance
+   * Get axios instance with API key authentication for VAS V2
    */
   getAuthenticatedAxios() {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.vasRequireAuth && this.vasApiKey) {
+      headers['X-API-Key'] = this.vasApiKey;
+    }
+
     return axios.create({
-      baseURL: this.vasApiUrl,
-      headers: {
-        'Authorization': `Bearer ${this.vasAuthToken}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000 // 30 second timeout
+      baseURL: `${this.vasApiUrl}/api/${this.vasApiVersion}`,
+      headers,
+      timeout: 30000
     });
   }
 
   /**
-   * Ensure authentication before API calls
+   * Get axios instance for compatibility endpoints
    */
-  async ensureAuthenticated() {
-    if (!this.isAuthenticated) {
-      const success = await this.authenticate();
-      if (!success) {
-        throw new Error('Failed to authenticate with VAS');
-      }
+  getCompatibilityAxios() {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.vasRequireAuth && this.vasApiKey) {
+      headers['X-API-Key'] = this.vasApiKey;
+    }
+
+    return axios.create({
+      baseURL: `${this.vasApiUrl}/api`,
+      headers,
+      timeout: 30000
+    });
+  }
+
+  /**
+   * Validate RTSP URL before creating device
+   */
+  async validateRTSPUrl(name, rtspUrl) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      console.log(`Validating RTSP URL for device: ${name}`);
+      const response = await api.post('/devices/validate', {
+        name,
+        rtsp_url: rtspUrl
+      });
+
+      console.log(`RTSP URL validation successful for: ${name}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to validate RTSP URL:', error.response?.data || error.message);
+      throw error;
     }
   }
 
@@ -80,32 +73,23 @@ class VASIntegrationService {
    */
   async createCameraInVAS(ruthAICamera) {
     try {
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
       const vasDevice = {
         name: ruthAICamera.name,
-        device_type: 'ip_camera',
-        manufacturer: 'Generic',
-        model: 'IP Camera',
-        ip_address: ruthAICamera.ip_address || '192.168.1.100',
-        port: ruthAICamera.port || 554,
         rtsp_url: ruthAICamera.feed_url || `rtsp://${ruthAICamera.ip_address || '192.168.1.100'}:554/live`,
-        username: ruthAICamera.username || 'admin',
-        password: ruthAICamera.password || 'password',
         location: ruthAICamera.location,
         description: `Camera imported from Ruth-AI Monitor (ID: ${ruthAICamera.id})`,
-        tags: ['ruth-ai-monitor', 'imported'],
-        metadata: { ruthAI_id: ruthAICamera.id }
+        is_active: true
       };
 
-      console.log(`📹 Creating VAS device for camera: ${ruthAICamera.name}`);
-      const response = await api.post('/devices/', vasDevice);
-      
-      console.log(`✅ Created VAS device ${response.data.id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
+      console.log(`Creating VAS device for camera: ${ruthAICamera.name}`);
+      const response = await api.post('/devices', vasDevice);
+
+      console.log(`Created VAS device ${response.data.id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to create camera in VAS:', error.response?.data || error.message);
+      console.error('Failed to create camera in VAS:', error.response?.data || error.message);
       throw error;
     }
   }
@@ -116,36 +100,27 @@ class VASIntegrationService {
   async updateCameraInVAS(ruthAICamera) {
     try {
       if (!ruthAICamera.vas_device_id) {
-        console.log('📹 Camera has no VAS device ID, creating new VAS device');
+        console.log('Camera has no VAS device ID, creating new VAS device');
         return await this.createCameraInVAS(ruthAICamera);
       }
 
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
       const vasDevice = {
         name: ruthAICamera.name,
-        device_type: 'ip_camera',
-        manufacturer: 'Generic',
-        model: 'IP Camera',
-        ip_address: ruthAICamera.ip_address || '192.168.1.100',
-        port: ruthAICamera.port || 554,
         rtsp_url: ruthAICamera.feed_url || `rtsp://${ruthAICamera.ip_address || '192.168.1.100'}:554/live`,
-        username: ruthAICamera.username || 'admin',
-        password: ruthAICamera.password || 'password',
         location: ruthAICamera.location,
         description: `Camera imported from Ruth-AI Monitor (ID: ${ruthAICamera.id})`,
-        tags: ['ruth-ai-monitor', 'imported'],
-        metadata: { ruthAI_id: ruthAICamera.id }
+        is_active: true
       };
 
-      console.log(`📹 Updating VAS device ${ruthAICamera.vas_device_id} for camera: ${ruthAICamera.name}`);
+      console.log(`Updating VAS device ${ruthAICamera.vas_device_id} for camera: ${ruthAICamera.name}`);
       const response = await api.put(`/devices/${ruthAICamera.vas_device_id}`, vasDevice);
-      
-      console.log(`✅ Updated VAS device ${ruthAICamera.vas_device_id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
+
+      console.log(`Updated VAS device ${ruthAICamera.vas_device_id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to update camera in VAS:', error.response?.data || error.message);
+      console.error('Failed to update camera in VAS:', error.response?.data || error.message);
       throw error;
     }
   }
@@ -156,20 +131,47 @@ class VASIntegrationService {
   async deleteCameraInVAS(ruthAICamera) {
     try {
       if (!ruthAICamera.vas_device_id) {
-        console.log('📹 Camera has no VAS device ID, nothing to delete in VAS');
+        console.log('Camera has no VAS device ID, nothing to delete in VAS');
         return;
       }
 
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
-      console.log(`📹 Deleting VAS device ${ruthAICamera.vas_device_id} for camera: ${ruthAICamera.name}`);
+      console.log(`Deleting VAS device ${ruthAICamera.vas_device_id} for camera: ${ruthAICamera.name}`);
       await api.delete(`/devices/${ruthAICamera.vas_device_id}`);
-      
-      console.log(`✅ Deleted VAS device ${ruthAICamera.vas_device_id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
+
+      console.log(`Deleted VAS device ${ruthAICamera.vas_device_id} for Ruth-AI Monitor camera ${ruthAICamera.id}`);
     } catch (error) {
-      console.error('❌ Failed to delete camera in VAS:', error.response?.data || error.message);
-      // Don't throw error for delete operations to avoid blocking Ruth-AI Monitor camera deletion
+      console.error('Failed to delete camera in VAS:', error.response?.data || error.message);
+    }
+  }
+
+  /**
+   * Get all devices from VAS V2
+   */
+  async getAllDevices() {
+    try {
+      const api = this.getAuthenticatedAxios();
+      const response = await api.get('/devices');
+      return response.data || [];
+    } catch (error) {
+      console.error('Failed to get devices from VAS:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get device details including streaming status
+   */
+  async getDeviceStatus(vasDeviceId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const response = await api.get(`/devices/${vasDeviceId}/status`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get device status from VAS:', error.response?.data || error.message);
+      return null;
     }
   }
 
@@ -178,23 +180,18 @@ class VASIntegrationService {
    */
   async syncExistingCameras(Camera) {
     try {
-      console.log('🔄 Starting camera sync with VAS...');
-      await this.ensureAuthenticated();
-      
+      console.log('Starting camera sync with VAS V2...');
       const api = this.getAuthenticatedAxios();
-      
-      // Get all VAS devices
-      const vasDevicesResponse = await api.get('/devices/');
-      console.log(`📹 Found ${vasDevicesResponse.data.length || 0} VAS devices`);
-      
-      const vasDevices = Array.isArray(vasDevicesResponse.data) 
-        ? vasDevicesResponse.data 
+
+      const vasDevicesResponse = await api.get('/devices');
+      console.log(`Found ${vasDevicesResponse.data.length || 0} VAS devices`);
+
+      const vasDevices = Array.isArray(vasDevicesResponse.data)
+        ? vasDevicesResponse.data
         : vasDevicesResponse.data.devices || [];
-      
-      // Get all Ruth-AI Monitor cameras
+
       const ruthAICameras = await Camera.findAll();
-      
-      // Create a map of existing Ruth-AI Monitor cameras by VAS device ID
+
       const ruthCameraMap = new Map();
       ruthAICameras.forEach(camera => {
         if (camera.vas_device_id) {
@@ -205,142 +202,337 @@ class VASIntegrationService {
       let syncedCount = 0;
       let importedCount = 0;
 
-      // Import VAS cameras into Ruth-AI Monitor
       for (const vasDevice of vasDevices) {
         if (ruthCameraMap.has(vasDevice.id)) {
-          // Camera already exists in Ruth-AI Monitor, skip
           syncedCount++;
           continue;
         }
 
-        // Import VAS device as new Ruth-AI Monitor camera
         try {
-          console.log(`📹 Importing VAS device: ${vasDevice.name} (${vasDevice.id})`);
-          console.log(`📹 VAS device data:`, JSON.stringify(vasDevice, null, 2));
+          console.log(`Importing VAS device: ${vasDevice.name} (${vasDevice.id})`);
           const cameraData = {
             name: vasDevice.name || `Camera ${vasDevice.id}`,
             location: vasDevice.location || 'Unknown',
-            status: vasDevice.status?.toLowerCase() === 'online' ? 'online' : 'offline',
-            feed_url: vasDevice.rtsp_url || `rtsp://${vasDevice.ip_address || '192.168.1.100'}:554/live`,
+            status: vasDevice.is_active ? 'online' : 'offline',
+            feed_url: vasDevice.rtsp_url,
             vas_device_id: vasDevice.id,
             janus_stream_id: vasDevice.id,
-            ip_address: vasDevice.ip_address || '192.168.1.100',
-            port: vasDevice.port || 554,
-            username: vasDevice.username || 'admin',
-            is_active: true,
+            ip_address: this.extractIPFromRTSP(vasDevice.rtsp_url),
+            port: this.extractPortFromRTSP(vasDevice.rtsp_url),
+            is_active: vasDevice.is_active,
             installation_date: new Date(vasDevice.created_at || Date.now())
           };
-          console.log(`📹 Camera data to create:`, JSON.stringify(cameraData, null, 2));
-          
-          const newCamera = await Camera.create(cameraData, { 
+
+          const newCamera = await Camera.create(cameraData, {
             validate: false,
-            individualHooks: false 
+            individualHooks: false
           });
-          
+
           importedCount++;
-          console.log(`✅ Imported VAS device ${vasDevice.id} as Ruth-AI Monitor camera ${newCamera.id}`);
+          console.log(`Imported VAS device ${vasDevice.id} as Ruth-AI Monitor camera ${newCamera.id}`);
         } catch (error) {
-          console.error(`❌ Failed to import VAS device ${vasDevice.id}:`, error.message);
+          console.error(`Failed to import VAS device ${vasDevice.id}:`, error.message);
         }
       }
 
-      console.log(`🔄 Camera sync completed: ${syncedCount} already synced, ${importedCount} imported from VAS`);
+      console.log(`Camera sync completed: ${syncedCount} already synced, ${importedCount} imported from VAS`);
       return { syncedCount, createdCount: importedCount };
     } catch (error) {
-      console.error('❌ Failed to sync cameras with VAS:', error.message);
+      console.error('Failed to sync cameras with VAS:', error.message);
       throw error;
     }
   }
 
   /**
-   * Get camera stream status from VAS
-   */
-  async getCameraStreamStatus(vasDeviceId) {
-    try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-
-      const response = await api.get(`/streams/${vasDeviceId}/status`);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Failed to get camera stream status from VAS:', error.response?.data || error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Start camera stream in VAS
+   * Start camera stream in VAS V2 (MediaSoup)
    */
   async startCameraStream(vasDeviceId) {
     try {
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
-      console.log(`📹 Starting stream for VAS device: ${vasDeviceId}`);
-      const response = await api.post(`/streams/${vasDeviceId}/start`);
-      
-      console.log(`✅ Started stream for VAS device: ${vasDeviceId}`);
-      return response.data;
+      console.log(`Starting MediaSoup stream for VAS device: ${vasDeviceId}`);
+      const response = await api.post(`/devices/${vasDeviceId}/start-stream`);
+
+      console.log(`Started MediaSoup stream for VAS device: ${vasDeviceId}`);
+
+      // Construct WebSocket URL from VAS API URL
+      // Convert http://10.30.250.245:8080 to ws://10.30.250.245:8080/ws/mediasoup
+      const websocketUrl = this.vasApiUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/mediasoup';
+      console.log(`WebSocket URL: ${websocketUrl}`);
+
+      return {
+        ...response.data,
+        device_id: vasDeviceId,
+        websocket_url: websocketUrl,
+        room_id: response.data.room_id || vasDeviceId,
+        vas_api_url: `${this.vasApiUrl}/api/${this.vasApiVersion}`
+      };
     } catch (error) {
-      console.error('❌ Failed to start camera stream in VAS:', error.response?.data || error.message);
+      console.error('Failed to start camera stream in VAS:', error.response?.data || error.message);
       throw error;
     }
   }
 
   /**
-   * Stop camera stream in VAS
+   * Stop camera stream in VAS V2
    */
   async stopCameraStream(vasDeviceId) {
     try {
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
-      console.log(`📹 Stopping stream for VAS device: ${vasDeviceId}`);
-      const response = await api.post(`/streams/${vasDeviceId}/stop`);
-      
-      console.log(`✅ Stopped stream for VAS device: ${vasDeviceId}`);
+      console.log(`Stopping stream for VAS device: ${vasDeviceId}`);
+      const response = await api.post(`/devices/${vasDeviceId}/stop-stream`);
+
+      console.log(`Stopped stream for VAS device: ${vasDeviceId}`);
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to stop camera stream in VAS:', error.response?.data || error.message);
+      console.error('Failed to stop camera stream in VAS:', error.response?.data || error.message);
       throw error;
     }
   }
 
   /**
-   * Get Janus mountpoints from VAS
+   * Get available recording dates for a device
    */
-  async getJanusMountpoints() {
+  async getRecordingDates(vasDeviceId) {
     try {
-      await this.ensureAuthenticated();
       const api = this.getAuthenticatedAxios();
 
-      const response = await api.get('/streams/janus/mountpoints');
+      const response = await api.get(`/recordings/devices/${vasDeviceId}/dates`);
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to get Janus mountpoints from VAS:', error.response?.data || error.message);
-      return { mountpoints: [] };
+      console.error('Failed to get recording dates:', error.response?.data || error.message);
+      return { dates: [] };
     }
   }
 
   /**
-   * Health check for VAS integration
+   * Get HLS playlist for historical recordings
+   */
+  async getRecordingPlaylist(vasDeviceId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const response = await api.get(`/recordings/devices/${vasDeviceId}/playlist`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get recording playlist:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Capture snapshot from live stream
+   */
+  async captureSnapshotLive(vasDeviceId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      console.log(`Capturing live snapshot for device: ${vasDeviceId}`);
+      const response = await api.post(`/snapshots/devices/${vasDeviceId}/capture/live`);
+
+      console.log(`Captured live snapshot: ${response.data.snapshot.id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to capture live snapshot:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Capture snapshot from historical footage
+   */
+  async captureSnapshotHistorical(vasDeviceId, timestamp) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      console.log(`Capturing historical snapshot for device: ${vasDeviceId} at ${timestamp}`);
+      const response = await api.post(`/snapshots/devices/${vasDeviceId}/capture/historical`, {
+        timestamp
+      });
+
+      console.log(`Captured historical snapshot: ${response.data.snapshot.id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to capture historical snapshot:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all snapshots
+   */
+  async getSnapshots(filters = {}) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const params = {};
+      if (filters.deviceId) params.device_id = filters.deviceId;
+      if (filters.limit) params.limit = filters.limit;
+      if (filters.skip) params.skip = filters.skip;
+
+      const response = await api.get('/snapshots', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get snapshots:', error.response?.data || error.message);
+      return { snapshots: [] };
+    }
+  }
+
+  /**
+   * Get snapshot details
+   */
+  async getSnapshot(snapshotId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const response = await api.get(`/snapshots/${snapshotId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get snapshot details:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete snapshot
+   */
+  async deleteSnapshot(snapshotId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      await api.delete(`/snapshots/${snapshotId}`);
+      console.log(`Deleted snapshot: ${snapshotId}`);
+    } catch (error) {
+      console.error('Failed to delete snapshot:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Capture bookmark from live stream
+   */
+  async captureBookmarkLive(vasDeviceId, label) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      console.log(`Capturing live bookmark for device: ${vasDeviceId}`);
+      const response = await api.post(`/bookmarks/devices/${vasDeviceId}/capture/live`, {
+        label
+      });
+
+      console.log(`Captured live bookmark: ${response.data.bookmark.id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to capture live bookmark:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Capture bookmark from historical footage
+   */
+  async captureBookmarkHistorical(vasDeviceId, centerTimestamp, label) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      console.log(`Capturing historical bookmark for device: ${vasDeviceId} at ${centerTimestamp}`);
+      const response = await api.post(`/bookmarks/devices/${vasDeviceId}/capture/historical`, {
+        center_timestamp: centerTimestamp,
+        label
+      });
+
+      console.log(`Captured historical bookmark: ${response.data.bookmark.id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to capture historical bookmark:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all bookmarks
+   */
+  async getBookmarks(filters = {}) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const params = {};
+      if (filters.deviceId) params.device_id = filters.deviceId;
+      if (filters.limit) params.limit = filters.limit;
+      if (filters.skip) params.skip = filters.skip;
+
+      const response = await api.get('/bookmarks', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get bookmarks:', error.response?.data || error.message);
+      return { bookmarks: [], total: 0 };
+    }
+  }
+
+  /**
+   * Get bookmark details
+   */
+  async getBookmark(bookmarkId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const response = await api.get(`/bookmarks/${bookmarkId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get bookmark details:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update bookmark label
+   */
+  async updateBookmark(bookmarkId, label) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      const response = await api.put(`/bookmarks/${bookmarkId}`, { label });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to update bookmark:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete bookmark
+   */
+  async deleteBookmark(bookmarkId) {
+    try {
+      const api = this.getAuthenticatedAxios();
+
+      await api.delete(`/bookmarks/${bookmarkId}`);
+      console.log(`Deleted bookmark: ${bookmarkId}`);
+    } catch (error) {
+      console.error('Failed to delete bookmark:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Health check for VAS V2 integration
    */
   async healthCheck() {
     try {
       const response = await axios.get(`${this.vasApiUrl}/health`, { timeout: 5000 });
-      const janusHealth = await this.getJanusHealth();
-      
+
       return {
-        vas_backend: response.data.status === 'healthy',
-        janus_gateway: janusHealth.janus_healthy,
-        authentication: this.isAuthenticated,
+        vas_backend: response.data.status === 'healthy' || response.status === 200,
+        mediasoup_configured: !!this.mediasoupUrl,
+        api_version: this.vasApiVersion,
+        authentication_enabled: this.vasRequireAuth,
         last_check: new Date().toISOString()
       };
     } catch (error) {
       return {
         vas_backend: false,
-        janus_gateway: false,
-        authentication: false,
+        mediasoup_configured: false,
         error: error.message,
         last_check: new Date().toISOString()
       };
@@ -348,84 +540,41 @@ class VASIntegrationService {
   }
 
   /**
-   * Get Janus Gateway health from VAS
+   * Get detailed health status
    */
-  async getJanusHealth() {
+  async getDetailedHealth() {
     try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-
-      const response = await api.get('/streams/janus/health');
+      const response = await axios.get(`${this.vasApiUrl}/health/detailed`, { timeout: 5000 });
       return response.data;
     } catch (error) {
-      return { janus_healthy: false, error: error.message };
+      console.error('Failed to get detailed health:', error.message);
+      return { status: 'unhealthy', error: error.message };
     }
   }
 
   /**
-   * Get WebRTC streams using new API
+   * Helper: Extract IP from RTSP URL
    */
-  async getWebRTCStreams() {
+  extractIPFromRTSP(rtspUrl) {
     try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-      
-      const response = await api.get('/streams/webrtc/streams');
-      return response.data;
-    } catch (error) {
-      console.error('Failed to get WebRTC streams:', error.response?.data || error.message);
-      return { streams: [] };
+      const match = rtspUrl.match(/rtsp:\/\/(?:[^:]+:[^@]+@)?([^:\/]+)/);
+      return match ? match[1] : '192.168.1.100';
+    } catch {
+      return '192.168.1.100';
     }
   }
 
   /**
-   * Get WebRTC stream configuration
+   * Helper: Extract port from RTSP URL
    */
-  async getWebRTCStreamConfig(streamId) {
+  extractPortFromRTSP(rtspUrl) {
     try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-      
-      const response = await api.get(`/streams/webrtc/streams/${streamId}/config`);
-      return response.data;
-    } catch (error) {
-      console.error('Failed to get WebRTC stream config:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Get WebRTC stream status
-   */
-  async getWebRTCStreamStatus(streamId) {
-    try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-      
-      const response = await api.get(`/streams/webrtc/streams/${streamId}/status`);
-      return response.data;
-    } catch (error) {
-      console.error('Failed to get WebRTC stream status:', error.response?.data || error.message);
-      return { status: 'unknown' };
-    }
-  }
-
-  /**
-   * Get system status from VAS WebRTC API
-   */
-  async getWebRTCSystemStatus() {
-    try {
-      await this.ensureAuthenticated();
-      const api = this.getAuthenticatedAxios();
-      
-      const response = await api.get('/streams/webrtc/system/status');
-      return response.data;
-    } catch (error) {
-      console.error('Failed to get WebRTC system status:', error.response?.data || error.message);
-      return { status: 'unknown' };
+      const match = rtspUrl.match(/:(\d+)\//);
+      return match ? parseInt(match[1]) : 554;
+    } catch {
+      return 554;
     }
   }
 }
 
-// Export singleton instance
 module.exports = new VASIntegrationService();

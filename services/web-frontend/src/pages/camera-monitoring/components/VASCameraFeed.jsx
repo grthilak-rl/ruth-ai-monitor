@@ -45,7 +45,7 @@ const VASCameraFeed = ({ camera, onModelToggle, onFullscreen, isFullscreen, onSt
       {/* Camera Feed Area */}
       <div className="relative aspect-video bg-slate-900">
         <div className="relative w-full h-full">
-          {/* VAS WebRTC Video Player */}
+          {/* VAS V2 WebRTC Video Player */}
           <video
             id={`video-${camera?.id}`}
             className="w-full h-full object-cover"
@@ -54,7 +54,7 @@ const VASCameraFeed = ({ camera, onModelToggle, onFullscreen, isFullscreen, onSt
             muted
             style={{ backgroundColor: '#1e293b' }}
           />
-          
+
           {/* WebRTC Controls */}
           <div className="absolute bottom-3 right-3 z-10">
             {activeStreams?.has(camera?.id) ? (
