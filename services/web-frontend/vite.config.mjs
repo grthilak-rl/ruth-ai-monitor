@@ -24,7 +24,7 @@ export default defineConfig({
   server: {
     port: 3004,
     host: "0.0.0.0",
-    strictPort: false,
+    strictPort: true,
     allowedHosts: ['.amazonaws.com', '.builtwithrocket.new'],
     proxy: {
       '/api': 'http://localhost:5000',

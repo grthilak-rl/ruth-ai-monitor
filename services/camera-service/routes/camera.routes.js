@@ -173,13 +173,36 @@ router.post('/bulk-update-status', verifyToken, requireOperator, bulkUpdateValid
 // VAS integration routes (require authentication)
 router.post('/sync-vas', verifyToken, requireOperator, cameraController.syncCamerasWithVAS);
 
+// Bookmarks routes (require authentication) - MUST be before /:id routes
+router.get('/bookmarks', verifyToken, cameraController.getBookmarks);
+router.get('/bookmarks/:bookmarkId', verifyToken, cameraController.getBookmark);
+router.put('/bookmarks/:bookmarkId', verifyToken, requireOperator, cameraController.updateBookmark);
+router.delete('/bookmarks/:bookmarkId', verifyToken, requireOperator, cameraController.deleteBookmark);
+
+// Snapshots routes (require authentication) - MUST be before /:id routes
+router.get('/snapshots', verifyToken, cameraController.getSnapshots);
+router.get('/snapshots/:snapshotId', verifyToken, cameraController.getSnapshot);
+router.delete('/snapshots/:snapshotId', verifyToken, requireOperator, cameraController.deleteSnapshot);
+
 // Protected routes (require authentication) - MUST be after specific routes
 router.get('/:id', verifyToken, cameraIdValidation, cameraController.getCameraById);
 router.post('/', verifyToken, requireOperator, createCameraValidation, cameraController.createCamera);
 router.put('/:id', verifyToken, requireOperator, updateCameraValidation, cameraController.updateCamera);
 router.delete('/:id', verifyToken, requireOperator, cameraIdValidation, cameraController.deleteCamera);
-router.get('/:id/stream-status', verifyToken, cameraIdValidation, cameraController.getCameraStreamStatus);
-router.post('/:id/start-stream', verifyToken, requireOperator, cameraIdValidation, cameraController.startCameraStream);
-router.post('/:id/stop-stream', verifyToken, requireOperator, cameraIdValidation, cameraController.stopCameraStream);
+router.get('/:id/stream-status', cameraIdValidation, cameraController.getCameraStreamStatus);
+router.post('/:id/start-stream', cameraIdValidation, cameraController.startCameraStream);
+router.post('/:id/stop-stream', cameraIdValidation, cameraController.stopCameraStream);
+
+// Recordings routes (require authentication)
+router.get('/:id/recordings/dates', verifyToken, cameraIdValidation, cameraController.getRecordingDates);
+router.get('/:id/recordings/playlist', verifyToken, cameraIdValidation, cameraController.getRecordingPlaylist);
+
+// Snapshots for specific camera (require authentication)
+router.post('/:id/snapshots/live', verifyToken, requireOperator, cameraIdValidation, cameraController.captureSnapshotLive);
+router.post('/:id/snapshots/historical', verifyToken, requireOperator, cameraIdValidation, cameraController.captureSnapshotHistorical);
+
+// Bookmarks for specific camera (require authentication)
+router.post('/:id/bookmarks/live', verifyToken, requireOperator, cameraIdValidation, cameraController.captureBookmarkLive);
+router.post('/:id/bookmarks/historical', verifyToken, requireOperator, cameraIdValidation, cameraController.captureBookmarkHistorical);
 
 module.exports = router;

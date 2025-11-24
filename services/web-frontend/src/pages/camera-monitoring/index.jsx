@@ -2,58 +2,35 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraFeedsPanel from './components/CameraFeedsPanel';
 import axios from 'axios';
 import config from '../../config/environment';
+import VASV2MediaSoupClient from '../../services/vasV2MediasoupClient';
 
 const CameraMonitoringPage = () => {
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [authToken, setAuthToken] = useState(null);
   const [activeStreams, setActiveStreams] = useState(new Map());
-  const janusRef = useRef(null);
+  const mediasoupClients = useRef(new Map());
 
   // WebRTC polyfills are now handled in index.html
-
-  const authenticateWithVAS = async () => {
-    try {
-      const response = await fetch(`${config.VAS_API_URL}/auth/login-json`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'admin123' })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Authentication failed: ${response.status}`);
-      }
-      
-      const authData = await response.json();
-      setAuthToken(authData.access_token);
-      return authData.access_token;
-    } catch (err) {
-      console.error('VAS authentication failed:', err);
-      throw err;
-    }
-  };
 
   const fetchCameras = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Authenticate with VAS first
-      const token = await authenticateWithVAS();
-      
-      // Fetch cameras from VAS
-      const response = await fetch(`${config.VAS_API_URL}/devices/`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(`${config.API_URL}/cameras/`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
-      
+
       if (!response.ok) {
         throw new Error(`Failed to fetch cameras: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      console.log('Fetched cameras from VAS:', data.devices);
-      setCameras(data.devices || []);
+      console.log('Fetched cameras from Ruth-AI:', data.cameras);
+      setCameras(data.cameras || []);
     } catch (err) {
       console.error('Failed to fetch cameras:', err);
       setError(`Failed to load cameras: ${err.message}`);
@@ -73,186 +50,96 @@ const CameraMonitoringPage = () => {
     }
   }, []);
 
-  // Initialize Janus (same as working test page)
-  const initJanus = async () => {
-    if (janusRef.current) return Promise.resolve();
-    
-    return new Promise((resolve, reject) => {
-      if (typeof window.Janus === 'undefined') {
-        reject(new Error('Janus library not loaded'));
-        return;
-      }
-      
-      window.Janus.init({
-        debug: "all",
-        callback: function() {
-          console.log('Janus initialized successfully');
-          resolve();
-        }
-      });
-    });
-  };
-
-  // Start WebRTC stream (replicated from working test page)
+  // Start stream on VAS V2
   const startStream = async (cameraId) => {
-    if (!authToken) {
-      console.error('No auth token available');
-      return;
-    }
-
     try {
-      // Initialize Janus if not already done
-      await initJanus();
-      
-      // Get WebRTC configuration
-      const configResponse = await fetch(`${config.VAS_API_URL}/streams/webrtc/streams/${cameraId}/config`, {
+      console.log(`Starting stream for camera ${cameraId}`);
+
+      // Call Ruth-AI backend to start stream on VAS V2
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${config.API_URL}/cameras/${cameraId}/start-stream`, {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
         }
       });
-      
-      if (!configResponse.ok) {
-        throw new Error(`HTTP ${configResponse.status}: ${configResponse.statusText}`);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to start stream: ${response.status}`);
       }
-      
-      const streamConfig = await configResponse.json();
-      console.log(`Got WebRTC config for camera ${cameraId}`);
-      
-      // Create Janus session
-      const janus = new window.Janus({
-        server: streamConfig.janus_websocket_url,
-        success: function() {
-          console.log(`Connected to Janus for camera ${cameraId}`);
-          
-          // Attach to streaming plugin
-          janus.attach({
-            plugin: streamConfig.plugin,
-            success: function(pluginHandle) {
-              console.log(`Attached to streaming plugin for camera ${cameraId}`);
-              
-              // Send watch request
-              pluginHandle.send({
-                message: { request: "watch", id: streamConfig.stream_id },
-                success: function(result) {
-                  console.log(`Watching stream ${streamConfig.stream_id}:`, result);
-                },
-                error: function(error) {
-                  console.error(`Watch request failed:`, error);
-                }
-              });
-              
-              // Store the plugin handle
-              setActiveStreams(prev => new Map(prev.set(cameraId, pluginHandle)));
-              
-              // Handle incoming media
-              pluginHandle.onmessage = function(msg, jsep) {
-                console.log(`Received message for camera ${cameraId}:`, msg);
-                
-                if (jsep) {
-                  pluginHandle.createAnswer({
-                    jsep: jsep,
-                    media: { audioSend: false, videoSend: false, audioRecv: true, videoRecv: true },
-                    success: function(jsep) {
-                      pluginHandle.send({
-                        message: { request: "start" },
-                        jsep: jsep
-                      });
-                    },
-                    error: function(error) {
-                      console.error(`Error creating answer for camera ${cameraId}:`, error);
-                    }
-                  });
-                }
-              };
-              
-              // Handle remote stream
-              pluginHandle.onremotestream = function(stream) {
-                console.log(`Received remote stream for ${cameraId}`);
-                console.log(`Stream tracks: ${stream.getTracks().length}`);
-                console.log(`Video tracks: ${stream.getVideoTracks().length}`);
-                
-                // Check if video element exists in DOM
-                const videoElement = document.getElementById(`video-${cameraId}`);
-                if (videoElement) {
-                  console.log(`Setting video element srcObject for ${cameraId}`);
-                  videoElement.srcObject = stream;
-                  
-                  // Try to play the video
-                  videoElement.play().then(() => {
-                    console.log(`Video play() successful for ${cameraId}`);
-                  }).catch(e => {
-                    console.error(`Video play() failed for ${cameraId}:`, e);
-                  });
-                } else {
-                  console.error(`Video element not found in DOM for ${cameraId}`);
-                }
-              };
-              
-              // Handle remote track (alternative method)
-              pluginHandle.onremotetrack = function(track, mid, on) {
-                console.log(`Received remote track for ${cameraId}: ${track.kind} (${on ? 'on' : 'off'})`);
-                
-                if (track.kind === 'video' && on) {
-                  // Create a new MediaStream with this track
-                  const stream = new MediaStream([track]);
-                  console.log(`Created MediaStream with ${stream.getTracks().length} tracks for ${cameraId}`);
-                  
-                  // Check if video element exists in DOM
-                  const videoElement = document.getElementById(`video-${cameraId}`);
-                  if (videoElement) {
-                    console.log(`Setting video element srcObject for ${cameraId}`);
-                    videoElement.srcObject = stream;
-                    
-                    // Try to play the video
-                    videoElement.play().then(() => {
-                      console.log(`Video play() successful for ${cameraId}`);
-                    }).catch(e => {
-                      console.error(`Video play() failed for ${cameraId}:`, e);
-                    });
-                  } else {
-                    console.error(`Video element not found in DOM for ${cameraId}`);
-                  }
-                }
-              };
-              
-              // Handle cleanup
-              pluginHandle.oncleanup = function() {
-                console.log(`Cleanup for camera ${cameraId}`);
-                setActiveStreams(prev => {
-                  const newMap = new Map(prev);
-                  newMap.delete(cameraId);
-                  return newMap;
-                });
-              };
-            },
-            error: function(error) {
-              console.error(`Failed to attach to streaming plugin:`, error);
-            }
-          });
-        },
-        error: function(error) {
-          console.error(`Janus session failed:`, error);
-        },
-        destroyed: function() {
-          console.log(`Janus session destroyed for camera ${cameraId}`);
-        }
-      });
-      
+
+      const data = await response.json();
+      console.log('Stream started successfully:', data);
+
+      // Create VAS V2 MediaSoup client and connect via WebSocket
+      const mediasoupClient = new VASV2MediaSoupClient();
+      const websocketUrl = data.websocket_url || 'ws://10.30.250.245:8080/ws/mediasoup';
+
+      console.log('Connecting to VAS V2 MediaSoup via WebSocket...');
+      const track = await mediasoupClient.connect(websocketUrl, data);
+
+      // Attach track to video element
+      console.log(`Received track for camera ${cameraId}:`, track);
+      const stream = new MediaStream([track]);
+      const videoElement = document.getElementById(`video-${cameraId}`);
+      if (videoElement) {
+        videoElement.srcObject = stream;
+        videoElement.play().catch(e => console.error('Error playing video:', e));
+      }
+
+      // Store the client
+      mediasoupClients.current.set(cameraId, mediasoupClient);
+
+      // Mark stream as active
+      setActiveStreams(prev => new Map(prev.set(cameraId, { active: true, data })));
+
     } catch (error) {
       console.error(`Failed to start stream for camera ${cameraId}:`, error);
+      alert(`Failed to start stream: ${error.message}`);
     }
   };
 
-  // Stop WebRTC stream
-  const stopStream = (cameraId) => {
-    const pluginHandle = activeStreams.get(cameraId);
-    if (pluginHandle) {
-      pluginHandle.detach();
+  // Stop stream on VAS V2
+  const stopStream = async (cameraId) => {
+    try {
+      console.log(`Stopping stream for camera ${cameraId}`);
+
+      // Disconnect MediaSoup client
+      const mediasoupClient = mediasoupClients.current.get(cameraId);
+      if (mediasoupClient) {
+        mediasoupClient.disconnect();
+        mediasoupClients.current.delete(cameraId);
+      }
+
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${config.API_URL}/cameras/${cameraId}/stop-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to stop stream: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Stream stopped successfully:', data);
+
+      // Remove from active streams
       setActiveStreams(prev => {
         const newMap = new Map(prev);
         newMap.delete(cameraId);
         return newMap;
       });
+
+    } catch (error) {
+      console.error(`Failed to stop stream for camera ${cameraId}:`, error);
+      alert(`Failed to stop stream: ${error.message}`);
     }
   };
 

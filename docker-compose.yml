@@ -69,7 +69,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=${JWT_SECRET:-ruth_monitor_jwt_secret_key}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://localhost:3008,http://10.30.250.245:3004,http://10.30.250.245:3008,http://10.30.250.245:3007}
     depends_on:
       database:
         condition: service_healthy
@@ -91,10 +91,12 @@ services:
       - NODE_ENV=${NODE_ENV:-production}
       - DATABASE_URL=mysql://${MYSQL_USER:-ruth_monitor}:${MYSQL_PASSWORD:-ruth_monitor_pass}@database:3306/${MYSQL_DATABASE:-ruth_monitor}
       - REDIS_URL=redis://redis:6379
-      - VAS_API_URL=${VAS_API_URL:-http://10.30.250.245:8000/api}
-      - VAS_USERNAME=${VAS_USERNAME:-admin}
-      - VAS_PASSWORD=${VAS_PASSWORD:-admin123}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+      - VAS_API_URL=${VAS_API_URL:-http://10.30.250.245:8080}
+      - VAS_API_VERSION=${VAS_API_VERSION:-v1}
+      - VAS_API_KEY=${VAS_API_KEY:-}
+      - VAS_REQUIRE_AUTH=${VAS_REQUIRE_AUTH:-false}
+      - MEDIASOUP_URL=${MEDIASOUP_URL:-ws://10.30.250.245:3001}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://localhost:3008,http://10.30.250.245:3004,http://10.30.250.245:3008,http://10.30.250.245:3007}
     depends_on:
       database:
         condition: service_healthy
@@ -117,7 +119,7 @@ services:
       - DATABASE_URL=mysql://${MYSQL_USER:-ruth_monitor}:${MYSQL_PASSWORD:-ruth_monitor_pass}@database:3306/${MYSQL_DATABASE:-ruth_monitor}
       - REDIS_URL=redis://redis:6379
       - AI_MODELS_URL=http://ai-models-service:8000
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://localhost:3008,http://10.30.250.245:3004,http://10.30.250.245:3008,http://10.30.250.245:3007}
     depends_on:
       database:
         condition: service_healthy
@@ -180,7 +182,7 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@ruth-ai.com}
       - ADMIN_PHONE=${ADMIN_PHONE:-+1234567890}
       # CORS Configuration
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://10.30.250.245:3004,http://10.30.250.245:3007}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://localhost:3008,http://10.30.250.245:3004,http://10.30.250.245:3008,http://10.30.250.245:3007}
     depends_on:
       database:
         condition: service_healthy
@@ -195,17 +197,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Web Frontend
-  web-frontend:
-    build: ./services/web-frontend
-    container_name: ruth-monitor-frontend
-    environment:
-      - REACT_APP_API_URL=http://localhost:3000/api
-      - REACT_APP_WS_URL=ws://localhost:3000
-    networks:
-      - ruth-monitor-network
-    restart: unless-stopped
 
 networks:
   ruth-monitor-network:
