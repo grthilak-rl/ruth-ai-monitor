@@ -26,10 +26,11 @@ vasV2Api.interceptors.request.use(
 vasV2Api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    }
+    // Don't redirect to login for development (auth disabled on backend)
+    // if (error.response?.status === 401) {
+    //   localStorage.removeItem('token');
+    //   window.location.href = '/login';
+    // }
     return Promise.reject(error);
   }
 );
