@@ -12,10 +12,10 @@ const LoginPage = () => {
     // Check if user is already authenticated
     const authToken = localStorage.getItem('authToken');
     const userSession = localStorage.getItem('userSession');
-    
+
     if (authToken && userSession) {
       // Redirect to dashboard if already logged in
-      navigate('/live-monitoring-dashboard');
+      navigate('/');
     }
   }, [navigate]);
 

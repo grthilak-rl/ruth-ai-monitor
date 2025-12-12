@@ -158,6 +158,7 @@ const queryValidation = [
 
 // Public routes (no authentication required)
 router.get('/', queryValidation, cameraController.getAllCameras);
+router.get('/models', cameraController.getAvailableAIModels);
 router.get('/stats', cameraController.getCameraStats);
 router.get('/vas-health', cameraController.getVASHealth);
 
@@ -193,9 +194,9 @@ router.get('/:id/stream-status', cameraIdValidation, cameraController.getCameraS
 router.post('/:id/start-stream', cameraIdValidation, cameraController.startCameraStream);
 router.post('/:id/stop-stream', cameraIdValidation, cameraController.stopCameraStream);
 
-// Recordings routes (require authentication)
-router.get('/:id/recordings/dates', verifyToken, cameraIdValidation, cameraController.getRecordingDates);
-router.get('/:id/recordings/playlist', verifyToken, cameraIdValidation, cameraController.getRecordingPlaylist);
+// Recordings routes
+router.get('/:id/recordings/dates', cameraIdValidation, cameraController.getRecordingDates);
+router.get('/:id/recordings/playlist', cameraIdValidation, cameraController.getRecordingPlaylist);
 
 // Snapshots for specific camera (require authentication)
 router.post('/:id/snapshots/live', verifyToken, requireOperator, cameraIdValidation, cameraController.captureSnapshotLive);
@@ -204,5 +205,10 @@ router.post('/:id/snapshots/historical', verifyToken, requireOperator, cameraIdV
 // Bookmarks for specific camera (require authentication)
 router.post('/:id/bookmarks/live', verifyToken, requireOperator, cameraIdValidation, cameraController.captureBookmarkLive);
 router.post('/:id/bookmarks/historical', verifyToken, requireOperator, cameraIdValidation, cameraController.captureBookmarkHistorical);
+
+// AI Model container management routes
+router.post('/:id/models/:modelId/start', cameraIdValidation, cameraController.startCameraModel);
+router.post('/:id/models/:modelId/stop', cameraIdValidation, cameraController.stopCameraModel);
+router.get('/:id/models/:modelId/status', cameraIdValidation, cameraController.getCameraModelStatus);
 
 module.exports = router;

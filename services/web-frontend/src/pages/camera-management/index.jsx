@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
-import { Link } from 'react-router-dom';
 import NavigationHeader from '../../components/ui/NavigationHeader';
 import BreadcrumbNavigation from '../../components/ui/BreadcrumbNavigation';
-import { Button } from '../../components/ui/Button';
 import CameraListPanel from './components/CameraListPanel';
 import CameraConfigPanel from './components/CameraConfigPanel';
 import CameraActionToolbar from './components/CameraActionToolbar';
@@ -184,11 +182,6 @@ const CameraManagement = () => {
               onRefresh={handleRefresh}
               onExport={handleExport}
             />
-            <Link to="/camera-monitoring">
-              <Button variant="default" className="w-full mt-4">
-                Go to Live Camera Monitoring
-              </Button>
-            </Link>
 
             <div className="flex h-[calc(100vh-200px)] bg-card rounded-lg border border-border overflow-hidden">
               {/* Left Panel - Camera List */}

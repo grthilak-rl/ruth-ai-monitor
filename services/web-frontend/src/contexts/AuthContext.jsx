@@ -4,18 +4,31 @@ import axios from 'axios';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [user, setUser] = useState({
+    username: 'demo_user',
+    email: 'demo@ruth-ai.com',
+    role: 'admin'
+  });
 
-  // Placeholder for actual authentication logic
+  // Authentication bypassed for development - auto-login as demo user
   useEffect(() => {
-    // In a real application, you would check for a token in localStorage or a cookie
-    // and validate it with your backend.
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      // Simulate a successful login
-      setIsAuthenticated(true);
-      setUser({ username: 'testuser' }); // Replace with actual user data
+    const demoUser = {
+      username: 'demo_user',
+      email: 'demo@ruth-ai.com',
+      role: 'admin'
+    };
+
+    // Auto-authenticate with demo user
+    setIsAuthenticated(true);
+    setUser(demoUser);
+
+    // Set placeholder tokens to prevent axios interceptor redirects and login page checks
+    if (!localStorage.getItem('authToken')) {
+      localStorage.setItem('authToken', 'demo-bypass-token');
+    }
+    if (!localStorage.getItem('userSession')) {
+      localStorage.setItem('userSession', JSON.stringify(demoUser));
     }
   }, []);
 

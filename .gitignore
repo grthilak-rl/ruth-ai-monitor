@@ -39,3 +39,9 @@ configs/nginx/ssl/*.crt
 services/ai-models-service/models/*.pt
 services/ai-models-service/models/*.pth
 services/ai-models-service/models/*.onnx
+
+# AI Model weights (too large for git)
+services/fall-detection-model/weights/*.pt
+services/fall-detection-model/weights/*.pth
+services/work-at-height-model/weights/*.pt
+services/work-at-height-model/weights/*.pth

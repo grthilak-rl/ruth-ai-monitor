@@ -3,7 +3,7 @@ import VASCameraFeed from './VASCameraFeed';
 import CameraGridControls from './CameraGridControls';
 import Icon from '../../../components/AppIcon';
 
-const CameraFeedsPanel = ({ cameras, onRefresh, isFullscreen, onToggleFullscreen, onStartStream, onStopStream, activeStreams }) => {
+const CameraFeedsPanel = ({ cameras, onRefresh, isFullscreen, onToggleFullscreen, onStartStream, onStopStream, activeStreams, onModelToggle }) => {
   const [selectedCameras, setSelectedCameras] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(null);
   const [gridSize, setGridSize] = useState('2x2');
@@ -28,17 +28,6 @@ const CameraFeedsPanel = ({ cameras, onRefresh, isFullscreen, onToggleFullscreen
   };
 
   const displayedCameras = cameras?.filter(camera => selectedCameras?.includes(camera?.id))?.slice(0, getMaxCameras());
-
-  const handleModelToggle = async (cameraId, modelId, enabled) => {
-    try {
-      // Assuming an API endpoint to toggle camera model
-      // await axios.patch(`/api/cameras/${cameraId}/models/${modelId}/toggle`, { isActive: enabled });
-      // fetchCameras(); // Re-fetch cameras to update model status
-      console.log(`Toggling model ${modelId} for camera ${cameraId} to ${enabled}`);
-    } catch (err) {
-      console.error('Failed to toggle model:', err);
-    }
-  };
 
   const handleFullscreen = (cameraId) => {
     if (fullscreenCamera === cameraId) {
@@ -68,7 +57,7 @@ const CameraFeedsPanel = ({ cameras, onRefresh, isFullscreen, onToggleFullscreen
         <div className="bg-card border border-border rounded-lg p-4">
           <VASCameraFeed
             camera={cameras?.find(c => c?.id === fullscreenCamera)}
-            onModelToggle={handleModelToggle}
+            onModelToggle={onModelToggle}
             onFullscreen={handleFullscreen}
             isFullscreen={true}
             onStartStream={onStartStream}
@@ -82,7 +71,7 @@ const CameraFeedsPanel = ({ cameras, onRefresh, isFullscreen, onToggleFullscreen
             <VASCameraFeed
               key={camera?.id}
               camera={camera}
-              onModelToggle={handleModelToggle}
+              onModelToggle={onModelToggle}
               onFullscreen={handleFullscreen}
               isFullscreen={false}
               onStartStream={onStartStream}

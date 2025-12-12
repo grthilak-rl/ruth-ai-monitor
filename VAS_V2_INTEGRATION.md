@@ -450,6 +450,357 @@ curl -H "X-API-Key: YOUR_API_KEY" \
   "http://localhost:8080/api/v1/snapshots?device_id={device_id}&limit=50"
 ```
 
+## Historical Feed Integration (Recordings Playback)
+
+VAS-MS automatically records all live streams to disk with a **1-hour rolling buffer** (600 segments at 6 seconds each). This allows Ruth-AI to:
+- Play back historical footage
+- Review past events
+- Create bookmarks and snapshots from historical data
+- Access recordings by date
+
+### How Historical Recording Works
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Automatic Recording Process                              │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│  1. Stream starts → Recording begins automatically       │
+│  2. FFmpeg creates HLS segments (6 seconds each)         │
+│  3. Segments stored in /recordings/hot/{device_id}/      │
+│  4. Organized by date: YYYYMMDD/segment_XXX.ts          │
+│  5. Rolling buffer: Keeps last 600 segments (~1 hour)   │
+│  6. Old segments auto-deleted when buffer is full        │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Recording Structure
+
+```
+/recordings/hot/
+└── {device_id}/
+    ├── stream.m3u8              # Master playlist (always current)
+    ├── 20251118/                # Today's recordings
+    │   ├── segment_001.ts
+    │   ├── segment_002.ts
+    │   └── segment_600.ts
+    └── 20251117/                # Yesterday's recordings
+        ├── segment_001.ts
+        └── segment_450.ts
+```
+
+### Integration Example: Historical Feed Player
+
+#### Step 1: Check Available Recording Dates
+
+```javascript
+// Get list of dates with available recordings
+const response = await fetch(
+  `http://10.30.250.245:8080/api/v1/recordings/devices/${deviceId}/dates`,
+  {
+    headers: { 'X-API-Key': 'YOUR_API_KEY' }
+  }
+);
+
+const data = await response.json();
+// Response:
+// {
+//   "status": "success",
+//   "device_id": "838fe284-8507-4465-80fe-28177359be2c",
+//   "dates": [
+//     {"date": "20251118", "formatted": "2025-11-18", "segments_count": 450},
+//     {"date": "20251117", "formatted": "2025-11-17", "segments_count": 600}
+//   ]
+// }
+```
+
+#### Step 2: Get HLS Playlist for Playback
+
+```javascript
+// Get the HLS playlist URL
+const playlistUrl = `http://10.30.250.245:8080/api/v1/recordings/devices/${deviceId}/playlist`;
+
+// Option A: Use HLS.js for web playback
+import Hls from 'hls.js';
+
+const video = document.getElementById('video');
+if (Hls.isSupported()) {
+  const hls = new Hls({
+    xhrSetup: (xhr) => {
+      // Add API key if authentication is enabled
+      xhr.setRequestHeader('X-API-Key', 'YOUR_API_KEY');
+    }
+  });
+
+  hls.loadSource(playlistUrl);
+  hls.attachMedia(video);
+
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    video.play();
+  });
+}
+
+// Option B: Native HLS support (Safari, iOS)
+else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+  video.src = playlistUrl;
+  video.addEventListener('loadedmetadata', () => {
+    video.play();
+  });
+}
+```
+
+#### Step 3: Timeline Navigation
+
+```javascript
+// HLS.js provides timeline controls
+const duration = hls.media.duration;  // Total recording duration in seconds
+const currentTime = hls.media.currentTime;  // Current playback position
+
+// Seek to specific time (e.g., 30 minutes ago)
+video.currentTime = duration - (30 * 60);
+
+// Seek to specific timestamp
+const targetDate = new Date('2025-11-18T14:30:00');
+const recordingStart = new Date(data.dates[0].formatted);
+const offset = (targetDate - recordingStart) / 1000;  // seconds
+video.currentTime = offset;
+```
+
+#### Step 4: Create Bookmark from Historical Moment
+
+```javascript
+// When user sees something interesting in historical feed
+async function createBookmarkAtCurrentTime() {
+  const currentTimestamp = new Date(
+    recordingStart.getTime() + (video.currentTime * 1000)
+  );
+
+  const response = await fetch(
+    `http://10.30.250.245:8080/api/v1/bookmarks/devices/${deviceId}/capture/historical`,
+    {
+      method: 'POST',
+      headers: {
+        'X-API-Key': 'YOUR_API_KEY',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        center_timestamp: currentTimestamp.toISOString(),
+        label: 'Event detected during review'
+      })
+    }
+  );
+
+  const bookmark = await response.json();
+  // Bookmark contains 6-second clip (±3s from timestamp)
+  // Can be downloaded via bookmark.video_url
+}
+```
+
+#### Step 5: Capture Snapshot from Historical Feed
+
+```javascript
+async function captureSnapshotAtCurrentTime() {
+  const currentTimestamp = new Date(
+    recordingStart.getTime() + (video.currentTime * 1000)
+  );
+
+  const response = await fetch(
+    `http://10.30.250.245:8080/api/v1/snapshots/devices/${deviceId}/capture/historical`,
+    {
+      method: 'POST',
+      headers: {
+        'X-API-Key': 'YOUR_API_KEY',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        timestamp: currentTimestamp.toISOString()
+      })
+    }
+  );
+
+  const snapshot = await response.json();
+  // Snapshot image can be accessed via snapshot.url
+}
+```
+
+### Complete Ruth-AI Integration Example
+
+```javascript
+import Hls from 'hls.js';
+import { Device } from 'mediasoup-client';
+
+class VASMSClient {
+  constructor(apiUrl, apiKey) {
+    this.apiUrl = apiUrl;
+    this.apiKey = apiKey;
+  }
+
+  // ============================================
+  // LIVE FEED (MediaSoup WebRTC)
+  // ============================================
+  async startLiveStream(deviceId) {
+    // Start the stream
+    const response = await fetch(
+      `${this.apiUrl}/api/v1/devices/${deviceId}/start-stream`,
+      {
+        method: 'POST',
+        headers: { 'X-API-Key': this.apiKey }
+      }
+    );
+
+    const { websocket_url, room_id } = await response.json();
+
+    // Connect via MediaSoup (see RUTH_AI_CLARIFICATION.md for full flow)
+    const device = new Device();
+    const ws = new WebSocket(websocket_url);
+    // ... MediaSoup connection setup
+
+    return { device, ws, room_id };
+  }
+
+  // ============================================
+  // HISTORICAL FEED (HLS Playback)
+  // ============================================
+  async loadHistoricalFeed(deviceId, videoElement) {
+    // Get available dates
+    const datesResponse = await fetch(
+      `${this.apiUrl}/api/v1/recordings/devices/${deviceId}/dates`,
+      { headers: { 'X-API-Key': this.apiKey } }
+    );
+    const { dates } = await datesResponse.json();
+
+    if (!dates || dates.length === 0) {
+      throw new Error('No recordings available');
+    }
+
+    // Load HLS playlist
+    const playlistUrl = `${this.apiUrl}/api/v1/recordings/devices/${deviceId}/playlist`;
+
+    const hls = new Hls({
+      xhrSetup: (xhr) => {
+        xhr.setRequestHeader('X-API-Key', this.apiKey);
+      }
+    });
+
+    hls.loadSource(playlistUrl);
+    hls.attachMedia(videoElement);
+
+    return { hls, dates };
+  }
+
+  // ============================================
+  // BOOKMARKS & SNAPSHOTS
+  // ============================================
+  async createBookmark(deviceId, timestamp, label) {
+    const response = await fetch(
+      `${this.apiUrl}/api/v1/bookmarks/devices/${deviceId}/capture/historical`,
+      {
+        method: 'POST',
+        headers: {
+          'X-API-Key': this.apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          center_timestamp: timestamp,
+          label: label
+        })
+      }
+    );
+
+    return await response.json();
+  }
+
+  async getBookmarks(deviceId) {
+    const response = await fetch(
+      `${this.apiUrl}/api/v1/bookmarks?device_id=${deviceId}`,
+      { headers: { 'X-API-Key': this.apiKey } }
+    );
+
+    return await response.json();
+  }
+}
+
+// Usage in Ruth-AI:
+const client = new VASMSClient('http://10.30.250.245:8080', 'YOUR_API_KEY');
+
+// Show live feed
+const liveVideo = document.getElementById('live-video');
+await client.startLiveStream(deviceId);
+
+// Show historical feed
+const historicalVideo = document.getElementById('historical-video');
+const { hls, dates } = await client.loadHistoricalFeed(deviceId, historicalVideo);
+
+// Create bookmark when AI detects event in historical review
+await client.createBookmark(
+  deviceId,
+  '2025-11-18T14:30:00',
+  'Anomaly detected by Ruth-AI during review'
+);
+```
+
+### Key Differences: Live vs Historical Feed
+
+| Feature | Live Feed (WebRTC) | Historical Feed (HLS) |
+|---------|-------------------|----------------------|
+| **Protocol** | MediaSoup WebRTC | HLS (HTTP Live Streaming) |
+| **Latency** | Low (~200-500ms) | Higher (~5-10 seconds) |
+| **Integration** | mediasoup-client | HLS.js or native |
+| **Use Case** | Real-time monitoring | Review past events |
+| **Playback Controls** | Not applicable | Seek, pause, rewind |
+| **Bookmarks** | Last 6 seconds only | Any point in history |
+| **Data Retention** | N/A (not recorded) | 1 hour rolling buffer |
+
+### Recording Retention and Management
+
+**Default Configuration:**
+- **Retention**: 600 segments (1 hour at 6 seconds each)
+- **Storage Location**: `/recordings/hot/{device_id}/`
+- **Auto-cleanup**: Old segments deleted when buffer full
+- **Format**: HLS (MPEG-TS segments + M3U8 playlist)
+
+**To check recording status:**
+```bash
+# Check if recordings exist
+curl http://10.30.250.245:8080/api/v1/recordings/devices/{device_id}/dates
+
+# Check device streaming status
+curl http://10.30.250.245:8080/api/v1/devices/{device_id}/status
+```
+
+**Storage requirements:**
+- 1080p @ 2 Mbps: ~900 MB per hour per camera
+- 720p @ 1 Mbps: ~450 MB per hour per camera
+- 480p @ 500 Kbps: ~225 MB per hour per camera
+
+### Troubleshooting Historical Feed
+
+**Problem**: "No recordings available"
+```bash
+# Check if device is/was streaming
+curl http://10.30.250.245:8080/api/v1/devices/{device_id}/status
+
+# Verify recording directory exists
+docker exec vas-backend ls -lh /recordings/hot/{device_id}/
+```
+
+**Problem**: "HLS playback not working"
+```javascript
+// Enable HLS.js debug mode
+const hls = new Hls({
+  debug: true,
+  xhrSetup: (xhr) => {
+    xhr.setRequestHeader('X-API-Key', 'YOUR_API_KEY');
+  }
+});
+```
+
+**Problem**: "Segments not found"
+- Check that stream was running at the requested time
+- Verify segments haven't been rotated out (1 hour retention)
+- Check recording dates endpoint for available timeframes
+
 ## Configuration
 
 ### Backend Environment Variables

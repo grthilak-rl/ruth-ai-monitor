@@ -313,7 +313,10 @@ class VASIntegrationService {
     try {
       const api = this.getAuthenticatedAxios();
 
-      const response = await api.get(`/recordings/devices/${vasDeviceId}/playlist`);
+      const response = await api.get(`/recordings/devices/${vasDeviceId}/playlist`, {
+        responseType: 'text'  // Ensure we get text, not parsed JSON
+      });
+      console.log('Fetched playlist from VAS, length:', response.data?.length || 0);
       return response.data;
     } catch (error) {
       console.error('Failed to get recording playlist:', error.response?.data || error.message);

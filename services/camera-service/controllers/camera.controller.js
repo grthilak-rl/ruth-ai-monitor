@@ -1,6 +1,63 @@
 const { validationResult } = require('express-validator');
 const Camera = require('../models/Camera');
 const vasIntegrationService = require('../services/vasIntegration.service');
+const dockerService = require('../services/docker.service');
+const axios = require('axios');
+
+/**
+ * Fetch available AI models from model services
+ * @returns {Promise<Array>} Array of available models
+ */
+const getAvailableModels = async () => {
+  const modelServices = [
+    { url: process.env.FALL_DETECTION_MODEL_URL || 'http://fall-detection-model:8000', id: 'fall-detection', name: 'Fall Detection' },
+    { url: process.env.WAH_DETECTION_MODEL_URL || 'http://work-at-height-model:8000', id: 'work-at-height', name: 'Work at Height Detection' }
+  ];
+
+  const models = [];
+
+  for (const service of modelServices) {
+    try {
+      // Check if container is running
+      const containerStatus = await dockerService.getModelContainerStatus(service.id);
+
+      // If container is running, try to get model info
+      let modelInfo = null;
+      if (containerStatus.running) {
+        try {
+          const response = await axios.get(`${service.url}/info`, { timeout: 2000 });
+          modelInfo = response.data;
+        } catch (err) {
+          console.warn(`Container running but model not responding: ${service.id}`);
+        }
+      }
+
+      models.push({
+        id: service.id,
+        name: modelInfo?.name || service.name,
+        description: modelInfo?.description || 'AI model for safety monitoring',
+        accuracy: modelInfo?.accuracy || 0.85,
+        status: containerStatus.running ? 'running' : 'stopped',
+        modelLoaded: modelInfo?.model_loaded || false,
+        enabled: false // Default to disabled
+      });
+    } catch (error) {
+      console.warn(`Failed to check model status for ${service.id}:`, error.message);
+      // Add placeholder for model
+      models.push({
+        id: service.id,
+        name: service.name,
+        description: 'Model service unavailable',
+        accuracy: 0.85,
+        status: 'unknown',
+        modelLoaded: false,
+        enabled: false
+      });
+    }
+  }
+
+  return models;
+};
 
 /**
  * Get all cameras from VAS V2
@@ -10,7 +67,11 @@ const getAllCameras = async (req, res) => {
   try {
     const { active } = req.query;
 
-    const devices = await vasIntegrationService.getAllDevices();
+    // Fetch devices and available models in parallel
+    const [devices, availableModels] = await Promise.all([
+      vasIntegrationService.getAllDevices(),
+      getAvailableModels()
+    ]);
 
     let filteredDevices = devices;
     if (active !== undefined) {
@@ -28,7 +89,8 @@ const getAllCameras = async (req, res) => {
       status: device.is_active ? 'ONLINE' : 'OFFLINE',
       vas_device_id: device.id,
       created_at: device.created_at,
-      updated_at: device.updated_at
+      updated_at: device.updated_at,
+      availableModels: availableModels // Add available models to each camera
     }));
 
     res.json({
@@ -549,26 +611,13 @@ const getWebRTCSystemStatus = async (req, res) => {
  */
 const getRecordingDates = async (req, res) => {
   try {
-    const camera = await Camera.findByPk(req.params.id);
-    if (!camera) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Camera not found'
-      });
-    }
+    // Use device ID directly from VAS (no database lookup needed)
+    const deviceId = req.params.id;
 
-    if (!camera.vas_device_id) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'Camera not synced with VAS'
-      });
-    }
-
-    const dates = await vasIntegrationService.getRecordingDates(camera.vas_device_id);
+    const dates = await vasIntegrationService.getRecordingDates(deviceId);
     res.json({
       success: true,
-      camera_id: camera.id,
-      vas_device_id: camera.vas_device_id,
+      device_id: deviceId,
       ...dates
     });
   } catch (error) {
@@ -587,28 +636,52 @@ const getRecordingDates = async (req, res) => {
  */
 const getRecordingPlaylist = async (req, res) => {
   try {
-    const camera = await Camera.findByPk(req.params.id);
-    if (!camera) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Camera not found'
-      });
+    // Use device ID directly from VAS (no database lookup needed)
+    const deviceId = req.params.id;
+
+    // Fetch the actual playlist from VAS and rewrite segment URLs
+    const playlistContent = await vasIntegrationService.getRecordingPlaylist(deviceId);
+    console.log('Playlist content received, length:', playlistContent?.length || 0);
+    console.log('First 100 chars:', playlistContent?.substring(0, 100));
+
+    if (!playlistContent || playlistContent.length === 0) {
+      throw new Error('Empty playlist received from VAS');
     }
 
-    if (!camera.vas_device_id) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'Camera not synced with VAS'
-      });
+    // VAS returns relative segment URLs like "segment-1764154612.ts"
+    // We need to rewrite these to absolute URLs for HLS.js
+    const vasUrl = process.env.VAS_V2_URL || 'http://10.30.250.245:8080';
+    const baseUrl = `${vasUrl}/api/v1/recordings/devices/${deviceId}`;
+
+    // Rewrite relative URLs to absolute URLs
+    let rewrittenPlaylist = playlistContent.replace(
+      /^(segment-\d+\.ts)$/gm,
+      `${baseUrl}/$1`
+    );
+
+    // CRITICAL: Force VOD mode to enable seek bar
+    // Add VOD playlist type if not present
+    if (!rewrittenPlaylist.includes('#EXT-X-PLAYLIST-TYPE')) {
+      // Insert after #EXTM3U header
+      rewrittenPlaylist = rewrittenPlaylist.replace(
+        '#EXTM3U',
+        '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD'
+      );
     }
 
-    const playlist = await vasIntegrationService.getRecordingPlaylist(camera.vas_device_id);
-    res.json({
-      success: true,
-      camera_id: camera.id,
-      vas_device_id: camera.vas_device_id,
-      ...playlist
-    });
+    // Add end list marker if not present (indicates VOD, not live)
+    if (!rewrittenPlaylist.includes('#EXT-X-ENDLIST')) {
+      rewrittenPlaylist += '\n#EXT-X-ENDLIST';
+    }
+
+    console.log('Rewritten playlist length:', rewrittenPlaylist.length);
+    console.log('First 300 chars:', rewrittenPlaylist.substring(0, 300));
+
+    // Return the playlist content directly with proper content type
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(rewrittenPlaylist);
   } catch (error) {
     console.error('Error getting recording playlist:', error);
     res.status(500).json({
@@ -968,6 +1041,112 @@ const deleteBookmark = async (req, res) => {
   }
 };
 
+/**
+ * Get available AI models
+ * @route GET /cameras/models
+ */
+const getAvailableAIModels = async (req, res) => {
+  try {
+    const models = await getAvailableModels();
+    res.json({
+      success: true,
+      count: models.length,
+      models
+    });
+  } catch (error) {
+    console.error('Error fetching AI models:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to fetch available AI models',
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Start AI model container for a camera
+ * @route POST /cameras/:id/models/:modelId/start
+ */
+const startCameraModel = async (req, res) => {
+  try {
+    const { id: cameraId, modelId } = req.params;
+
+    console.log(`Starting model ${modelId} for camera ${cameraId}`);
+
+    // Start the model container
+    const result = await dockerService.startModelContainer(modelId);
+
+    res.json({
+      success: true,
+      camera_id: cameraId,
+      model_id: modelId,
+      ...result
+    });
+  } catch (error) {
+    console.error(`Error starting model ${req.params.modelId}:`, error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: `Failed to start model: ${error.message}`,
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Stop AI model container for a camera
+ * @route POST /cameras/:id/models/:modelId/stop
+ */
+const stopCameraModel = async (req, res) => {
+  try {
+    const { id: cameraId, modelId } = req.params;
+
+    console.log(`Stopping model ${modelId} for camera ${cameraId}`);
+
+    // Stop the model container
+    const result = await dockerService.stopModelContainer(modelId);
+
+    res.json({
+      success: true,
+      camera_id: cameraId,
+      model_id: modelId,
+      ...result
+    });
+  } catch (error) {
+    console.error(`Error stopping model ${req.params.modelId}:`, error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: `Failed to stop model: ${error.message}`,
+      error_details: error.message
+    });
+  }
+};
+
+/**
+ * Get status of AI model container
+ * @route GET /cameras/:id/models/:modelId/status
+ */
+const getCameraModelStatus = async (req, res) => {
+  try {
+    const { id: cameraId, modelId } = req.params;
+
+    const status = await dockerService.getModelContainerStatus(modelId);
+
+    res.json({
+      success: true,
+      camera_id: cameraId,
+      model_id: modelId,
+      ...status
+    });
+  } catch (error) {
+    console.error(`Error getting model status ${req.params.modelId}:`, error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: `Failed to get model status: ${error.message}`,
+      error_details: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllCameras,
   getCameraById,
@@ -997,5 +1176,9 @@ module.exports = {
   getBookmarks,
   getBookmark,
   updateBookmark,
-  deleteBookmark
+  deleteBookmark,
+  getAvailableAIModels,
+  startCameraModel,
+  stopCameraModel,
+  getCameraModelStatus
 };
