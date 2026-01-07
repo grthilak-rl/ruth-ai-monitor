@@ -27,20 +27,30 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+    const authToken = localStorage.getItem('authToken');
+
+    // Skip authentication redirects if using demo bypass token
+    const isDemoMode = authToken === 'demo-bypass-token';
+
+    if (isDemoMode) {
+      // In demo mode, just log errors without redirecting
+      console.warn('API call failed in demo mode:', error.response?.status, originalRequest.url);
+      return Promise.reject(error);
+    }
+
     // Only attempt token refresh if:
     // 1. Error is 401 Unauthorized
     // 2. Request hasn't been retried already
     // 3. We have a refresh token
     // 4. This isn't a login or refresh token request
     if (
-      error.response?.status === 401 && 
+      error.response?.status === 401 &&
       !originalRequest._retry &&
       !originalRequest.url?.includes('/api/auth/login') &&
       !originalRequest.url?.includes('/api/auth/refresh-token')
     ) {
       const refreshToken = localStorage.getItem('refreshToken');
-      
+
       if (refreshToken) {
         originalRequest._retry = true;
         try {

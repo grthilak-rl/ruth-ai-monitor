@@ -16,9 +16,11 @@ RUN npm install --omit=dev && npm cache clean --force
 # Copy source code
 COPY . .
 
-# Create non-root user
+# Create non-root user and docker group
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    addgroup -g 984 docker && \
+    adduser nodejs docker
 
 # Change ownership of the app directory
 RUN chown -R nodejs:nodejs /app

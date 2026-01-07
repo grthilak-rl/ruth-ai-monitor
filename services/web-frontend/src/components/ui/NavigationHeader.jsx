@@ -19,6 +19,12 @@ const NavigationHeader = ({ user, onNavigate }) => {
       tooltip: 'Real-time camera feeds and violation alerts'
     },
     {
+      label: 'Live Monitoring',
+      path: '/camera-monitoring',
+      icon: 'Video',
+      tooltip: 'Live camera feeds with AI model controls'
+    },
+    {
       label: 'Analytics',
       path: '/analytics-reports',
       icon: 'BarChart3',
