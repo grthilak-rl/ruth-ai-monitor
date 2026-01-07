@@ -97,6 +97,8 @@ services:
       - VAS_REQUIRE_AUTH=${VAS_REQUIRE_AUTH:-false}
       - MEDIASOUP_URL=${MEDIASOUP_URL:-ws://10.30.250.245:3001}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3007,http://localhost:3008,http://10.30.250.245:3004,http://10.30.250.245:3008,http://10.30.250.245:3007}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       database:
         condition: service_healthy
@@ -197,6 +199,54 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # Fall Detection Model Service (Always Running)
+  fall-detection-model:
+    build: ./services/fall-detection-model
+    container_name: ruth-model-fall-detection
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./services/fall-detection-model/weights:/app/weights
+    environment:
+      - MODEL_NAME=fall-detection
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      timeout: 10s
+      retries: 5
+
+  # Work at Height Model Service (Always Running)
+  work-at-height-model:
+    build: ./services/work-at-height-model
+    container_name: ruth-model-work-at-height
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./services/work-at-height-model/weights:/app/weights
+    environment:
+      - MODEL_NAME=work-at-height
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+    networks:
+      - ruth-monitor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      timeout: 10s
+      retries: 5
 
 networks:
   ruth-monitor-network:
