@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraFeedsPanel from './components/CameraFeedsPanel';
+import NavigationHeader from '../../components/ui/NavigationHeader';
+import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
 import config from '../../config/environment';
 import VASV2MediaSoupClient from '../../services/vasV2MediasoupClient';
 
 const CameraMonitoringPage = () => {
+  const { user } = useAuth();
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -30,7 +33,14 @@ const CameraMonitoringPage = () => {
 
       const data = await response.json();
       console.log('Fetched cameras from Ruth-AI:', data.cameras);
-      setCameras(data.cameras || []);
+
+      // activeModels is now returned directly from the backend based on subscriptions
+      const camerasWithActiveModels = (data.cameras || []).map(cam => ({
+        ...cam,
+        activeModels: cam.activeModels || []
+      }));
+
+      setCameras(camerasWithActiveModels);
     } catch (err) {
       console.error('Failed to fetch cameras:', err);
       setError(`Failed to load cameras: ${err.message}`);
@@ -49,6 +59,66 @@ const CameraMonitoringPage = () => {
       }
     }
   }, []);
+
+  // Handle model toggle (subscribe/unsubscribe camera to AI model)
+  const handleModelToggle = async (cameraId, modelId, enabled) => {
+    try {
+      console.log(`${enabled ? 'Subscribing to' : 'Unsubscribing from'} model ${modelId} for camera ${cameraId}`);
+
+      // Update local state immediately for responsive UI
+      setCameras(prevCameras =>
+        prevCameras.map(cam => {
+          if (cam.id === cameraId) {
+            const activeModels = cam.activeModels || [];
+            return {
+              ...cam,
+              activeModels: enabled
+                ? [...activeModels, modelId]
+                : activeModels.filter(id => id !== modelId)
+            };
+          }
+          return cam;
+        })
+      );
+
+      // Call backend API to subscribe/unsubscribe to model
+      const endpoint = enabled ? 'subscribe' : 'unsubscribe';
+      const response = await fetch(`${config.API_URL}/cameras/${cameraId}/models/${modelId}/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to ${endpoint} to model`);
+      }
+
+      const data = await response.json();
+      console.log(`Model ${modelId} ${endpoint} result:`, data);
+
+    } catch (error) {
+      console.error(`Failed to toggle model ${modelId}:`, error);
+      alert(`Failed to ${enabled ? 'subscribe to' : 'unsubscribe from'} model: ${error.message}`);
+
+      // Revert UI state on error
+      setCameras(prevCameras =>
+        prevCameras.map(cam => {
+          if (cam.id === cameraId) {
+            const activeModels = cam.activeModels || [];
+            return {
+              ...cam,
+              activeModels: enabled
+                ? activeModels.filter(id => id !== modelId)
+                : [...activeModels, modelId]
+            };
+          }
+          return cam;
+        })
+      );
+    }
+  };
 
   // Start stream on VAS V2
   const startStream = async (cameraId) => {
@@ -160,25 +230,39 @@ const CameraMonitoringPage = () => {
   }, []);
 
   if (loading) {
-    return <div className="text-center py-8">Loading cameras...</div>;
+    return (
+      <div className="min-h-screen bg-background">
+        <NavigationHeader user={user} onNavigate={() => {}} />
+        <div className="pt-[60px] text-center py-8">Loading cameras...</div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="text-center py-8 text-red-500">Error: {error}</div>;
+    return (
+      <div className="min-h-screen bg-background">
+        <NavigationHeader user={user} onNavigate={() => {}} />
+        <div className="pt-[60px] text-center py-8 text-red-500">Error: {error}</div>
+      </div>
+    );
   }
 
   return (
-    <div className={`p-4 ${isFullscreen ? 'fixed inset-0 bg-black z-50' : ''}`}>
-      {!isFullscreen && <h1 className="text-2xl font-bold mb-4">Camera Live Monitoring</h1>}
-      <CameraFeedsPanel
-        cameras={cameras}
-        onRefresh={fetchCameras}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
-        onStartStream={startStream}
-        onStopStream={stopStream}
-        activeStreams={activeStreams}
-      />
+    <div className={`min-h-screen bg-background ${isFullscreen ? 'fixed inset-0 bg-black z-50' : ''}`}>
+      {!isFullscreen && <NavigationHeader user={user} onNavigate={() => {}} />}
+      <div className={`${!isFullscreen ? 'pt-[60px]' : ''} p-4`}>
+        {!isFullscreen && <h1 className="text-2xl font-bold mb-4">Camera Live Monitoring</h1>}
+        <CameraFeedsPanel
+          cameras={cameras}
+          onRefresh={fetchCameras}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          onStartStream={startStream}
+          onStopStream={stopStream}
+          activeStreams={activeStreams}
+          onModelToggle={handleModelToggle}
+        />
+      </div>
     </div>
   );
 };

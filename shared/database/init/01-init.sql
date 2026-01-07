@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS camera_detection_models (
     UNIQUE KEY unique_camera_model (camera_id, detection_model_id)
 );
 
+-- Camera-Model Subscriptions table (for real-time subscription management)
+CREATE TABLE IF NOT EXISTS camera_model_subscriptions (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    camera_id INT UNSIGNED NOT NULL,
+    detection_model_id INT UNSIGNED NOT NULL,
+    subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    subscribed_by INT UNSIGNED,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_camera_model (camera_id, detection_model_id),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (detection_model_id) REFERENCES detection_models(id) ON DELETE CASCADE,
+    FOREIGN KEY (subscribed_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_active (is_active),
+    INDEX idx_camera (camera_id),
+    INDEX idx_model (detection_model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Violation reports table
 CREATE TABLE IF NOT EXISTS violation_reports (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
